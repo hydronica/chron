@@ -3,6 +3,7 @@ package chron
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -12,7 +13,7 @@ const (
 	DashMMDDYY        = "01-02-06"
 	DashMMDDYYYY      = "01-02-2006"
 	SlashMMDDYY       = "01/02/06"
-	SlashMMDDYYYY      = "01/02/2006"
+	SlashMMDDYYYY     = "01/02/2006"
 	ShortDateTime     = SlashMMDDYYYY + " 15:04 PM"
 	ShortSecond       = SlashMMDDYYYY + " 15:04:05 PM"
 	ShortDateTime24   = SlashMMDDYYYY + " 15:04"
@@ -76,4 +77,25 @@ func ParseWithFormats(s string) (time.Time, error) {
 		return t, nil
 	}
 	return ZeroTime(), fmt.Errorf("string didn't match an attempted format")
+}
+
+func Parse(s string) (time.Time, error) {
+	var errs []error
+	for _, fn := range ParseFunctions {
+		t, err := fn(s)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		return t, nil
+	}
+	return ZeroTime(), ErrJoin(errs, "; ")
+}
+
+func ErrJoin(errs []error, delim string) error {
+	s := make([]string, 0, len(errs))
+	for _, e := range errs {
+		s = append(s, e.Error())
+	}
+	return fmt.Errorf("%s", strings.Join(s, delim))
 }
