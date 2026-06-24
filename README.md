@@ -1,9 +1,4 @@
 ## chron
-
-**v2 (this tree):** `chron.Chron` is a type alias for `time.Time`. Use package functions (`YearOf`, `Increment`, `SpanContains`, …) and `tools/dura` for fuzzy durations. The separate `Year`/`Month`/… struct types and `chron.Time` / `Incrementer` interfaces are removed. Import fuzzy durations as `tools/dura` (sibling package to `chron`).
-
----
-
 it's time :]
 
 ![](https://github.com/dustinevan/chron/blob/master/chron.png "chron")
