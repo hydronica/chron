@@ -105,9 +105,10 @@ convert for display), but nothing enforces it.
    containing this date") are represented as a concrete `Span` with explicit `Start` and
    `End`, not inferred from a truncated instant alone.
 
-6. **Interval comparisons stay explicit.** Do not silently change `Before`/`After`
-   semantics vs stdlib on `Chron`. Use `Span.Contains` and `Span.Overlaps` for
-   membership and overlap.
+6. **Interval comparisons stay explicit.** Embedded `time.Time` keeps stdlib `Before` /
+   `After` / `Equal` / `Compare` for instant ordering. Precision does not change those
+   semantics. Use `Span.Contains`, `Span.Overlaps`, and calendar helpers (`SameMonth`,
+   …) for buckets and membership — never overload the stdlib names.
 
 7. **UTC in, UTC stored.** Constructors normalize to UTC. Display conversion is
    explicit (`InLocation`).
@@ -132,9 +133,6 @@ type Chron struct {
     // precision is optional metadata: how this value should be truncated,
     // compared, and serialized. Zero value = Nanosecond (full instant).
     precision Precision
-    // weekStart overrides DefaultWeekStart for WeekSpan / StartOfWeek on this
-    // Chron. Zero value = use DefaultWeekStart (ISO Monday).
-    weekStart WeekStart
 }
 ```
 
@@ -157,9 +155,8 @@ other type. v1 replaces that lattice with a small set of concrete types:
 | `Chron` | struct | Instants; optional `Precision` metadata for truncation and serialization |
 | `Span` | struct | Half-open interval `[Start, End)` — the month, week, day, or arbitrary range |
 | `Duration` | struct | Calendar + clock offset to apply via `Add` / `Sub` |
-| `Precision` | enum (`int` or `uint8`) | Metadata on `Chron`: how to truncate and serialize |
-| `WeekStart` | enum | Which weekday begins a week span (`Monday` ISO default, or `Sunday`) |
-| `Unit` | enum | Named unit inside `Duration` (`Month`, `Week`, `Hour`, …) |
+| `Precision` | enum (`uint8`) | Truncation, serialization, and `Span(p)` buckets. `MondayWeek` / `SundayWeek` are input-only week-boundary selectors; stored precision normalizes to `Week` |
+| `Unit` | enum | Named unit inside `Duration` (`Month`, `Week`, `Hour`, …) — distinct from `Precision` |
 
 There is no `chron.Time` interface. Callers work with `Chron` and `Span` directly.
 
@@ -170,7 +167,7 @@ functions, store it in structs, and ask `Contains` without re-deriving boundarie
 time.
 
 **Chron methods vs package functions.** Operations on an instant are methods:
-`c.StartOfDay()`, `c.Add(chron.Months(1))`, `c.MonthSpan()`. Package functions are
+`c.Truncate(chron.Day)`, `c.Add(chron.Months(1))`, `c.Span(chron.Month)`. Package functions are
 reserved for building values without a receiver (`Now`, `Parse`, `Months`, `NewSpan`).
 
 If we later need a distinct struct (e.g. `Date` with no clock component), it will be
@@ -188,8 +185,12 @@ interface.
 | `Now() Chron` | Current instant, UTC |
 | `FromTime(t time.Time) Chron` | Wrap existing `time.Time`, normalize to UTC |
 | `Date(y, m, d int) Chron` | Calendar date at midnight UTC, precision `Day` |
-| `Parse(layout, s string) (Chron, error)` | Parse with explicit layout |
-| `ParseAuto(s string) (Chron, error)` | Try registered layouts (see Parsing) |
+| `Parse(s string) (Chron, error)` | Try registered layouts; set `precision` from match (see Parsing) |
+| `ParseFrom(layout, s string) (Chron, error)` | Parse with explicit layout; set `precision` from layout |
+
+**Explicit-layout name:** `ParseFrom` is the v1 name for the layout-parameter variant.
+Alternatives if renamed later: `ParseLayout`, `ParseWithLayout`, `ParseInLayout`,
+`ParseExact`.
 
 Constructors always store UTC. Passing a `time.Time` in another location converts via
 `.UTC()` unless a future `FromTimeIn(loc)` variant is needed.
@@ -199,32 +200,33 @@ Constructors always store UTC. Passing a `time.Time` in another location convert
 | Method | Purpose |
 |--------|---------|
 | `AsTime() time.Time` | Return underlying stdlib value for third-party APIs |
+| `IsZero() bool` | Invalid / unset — `true` when embedded `time.Time` is zero |
 | Embedded `time.Time` methods | `Format`, `Unix`, `Year`, `Month`, … work as today |
 
-### Precision metadata
+### Truncation and precision
+
+`Truncate(p Precision)` is the **only** way to set precision by calendar intent. It
+returns the **inclusive start** of the unit containing the receiver (UTC) and sets
+`precision` on the result. There is no separate `WithPrecision` — relabeling without
+moving the instant would disagree with parse anchors and `Span(c.Precision())`.
+
+**Week-boundary inputs.** `Truncate(Week)` uses `DefaultWeekStart`. `Truncate(MondayWeek)`
+and `Truncate(SundayWeek)` use explicit ISO Monday or US Sunday boundaries. All three
+store **`Week` precision** on the result — `MondayWeek` / `SundayWeek` are never retained
+on `Chron`; they select boundaries only (same normalization for `Span(p).Start`).
 
 | Method | Purpose |
 |--------|---------|
-| `Precision() Precision` | Current precision metadata |
-| `WithPrecision(p Precision) Chron` | Same instant, different serialization intent |
-| `WithWeekStart(w WeekStart) Chron` | Same instant; `WeekSpan()` uses `w` instead of default |
-| `WeekStart() WeekStart` | Effective week start for this value (explicit or `DefaultWeekStart`) |
+| `Truncate(p Precision) Chron` | Start of unit for `p`; sets `precision` on result (week inputs → `Week`) |
+| `Precision() Precision` | Read current precision metadata (set by parse, `Truncate`, or `Add`) |
 
-### Truncation and start-of
+`Truncate(chron.Month)` is equivalent to `c.Span(chron.Month).Start`.
+`Truncate(chron.SundayWeek)` is equivalent to `c.Span(chron.SundayWeek).Start` — both
+yield `Week` precision on the truncated instant.
 
-Return the **inclusive start** of the calendar unit containing the receiver (UTC).
-These set `precision` on the result to match the unit.
+Examples: `Truncate(Year)`, `Truncate(Month)`, `Truncate(Week)`, `Truncate(SundayWeek)`.
 
-| Method | Purpose |
-|--------|---------|
-| `Truncate(p Precision) Chron` | General form — zero sub-units per `p` |
-| `StartOfYear() Chron` | Jan 1 00:00:00 UTC of this instant's year |
-| `StartOfMonth() Chron` | 1st 00:00:00 UTC of this instant's month |
-| `StartOfDay() Chron` | Midnight UTC of this instant's calendar day |
-| `StartOfHour() Chron` | Top of the hour containing this instant |
-| `StartOfWeek() Chron` | Start of the week containing this instant (uses effective `WeekStart`) |
-
-`c.StartOfMonth()` is equivalent to `c.MonthSpan().Start` — use whichever reads better.
+See [Span derivation](#span-derivation) for week boundary details.
 
 ### Add and subtract
 
@@ -263,14 +265,14 @@ unit in `d`, because that is what the user signaled they care about.
 | `Month` (Feb 1 anchor) | `Days(5)` | Feb 6 | `Day` |
 | `Month` | `Months(1)` | Mar 1 | `Month` |
 | `Day` | `Hours(3)` | same day + 3h | `Hour` |
-| `Hour` | `Minutes(15)` | +15 minutes | `Minute` |
-| `Minute` | `Seconds(30)` | +30 seconds | `Second` |
+| `Hour` | `Min(15)` | +15 minutes | `Minute` |
+| `Minute` | `Sec(30)` | +30 seconds | `Second` |
 | `Nanosecond` | `Hours(2)` | +2 hours | `Nanosecond` (see below) |
 | `Nanosecond` | `Months(1)` | +1 calendar month | `Month` |
 
 **Nanosecond floor for clock offsets.** Values at `Nanosecond` precision — the default
 for `FromTime`, `Now`, and any full instant — stay `Nanosecond` when the offset is
-**clock-only** (`Hours`, `Minutes`, `Seconds`, `Clock`). Adding two hours to an event
+**clock-only** (`Hours`, `Min`, `Sec`, `Clock`). Adding two hours to an event
 timestamp is still an event timestamp, not an "hour bucket." Calendar fields in `d`
 (`Years`, `Months`, `Weeks`, `Days`) still update precision normally.
 
@@ -283,7 +285,7 @@ day := chron.Date(2026, 6, 1)         // Day
 day.Add(chron.Hours(3)).Precision()   // Hour — caller moved to hour granularity
 ```
 
-`c.StartOfMonth().Add(chron.Days(5))` is the common case: `StartOfMonth()` yields Jan 1
+`c.Truncate(chron.Month).Add(chron.Days(5))` is the common case: truncate yields Jan 1
 with `Month` precision; adding five days yields **Jan 6 with `Day` precision**. No
 conflict — month precision on the receiver describes the starting intent; day precision
 on the result describes the new intent.
@@ -298,81 +300,111 @@ composite wins (`Hour` here). Calendar fields still apply in full before clock. 
 receiver is `Nanosecond` and the composite includes only clock units, result stays
 `Nanosecond`.
 
-**`StartOf*` / `Truncate` / `WithPrecision`** set precision directly from the operation;
-they do not use the rule above.
+**`Truncate`** set precision directly from the operation; they do not use the finest-unit
+rule below. **`Add` / `Sub`** update precision from the offset.
 
 ```go
-jan := chron.Date(2026, 1, 15).StartOfMonth() // Jan 1, Month
-jan.Precision()                               // Month
-sixth := jan.Add(chron.Days(5))               // Jan 6, Day
-sixth.Precision()                             // Day — original jan unchanged
+jan := chron.Date(2026, 1, 15).Truncate(chron.Month) // Jan 1, Month
+jan.Precision()                                      // Month
+sixth := jan.Add(chron.Days(5))                      // Jan 6, Day
+sixth.Precision()                                    // Day — original jan unchanged
 ```
 
 ### Span derivation
 
 Build the calendar bucket **containing** this instant. Returns `[start, end)` as `Span`.
-
-| Method | Purpose |
-|--------|---------|
-| `Span(p Precision) Span` | General form at precision `p`; `Week` uses effective `WeekStart` |
-| `YearSpan() Span` | `[Jan 1, Jan 1 next year)` containing this instant |
-| `MonthSpan() Span` | `[1st 00:00, 1st next month)` |
-| `WeekSpan() Span` | Week containing this instant (effective `WeekStart`) |
-| `WeekSpanFrom(w WeekStart) Span` | Same, but `w` for this call only — ignores `c.weekStart` |
-| `DaySpan() Span` | `[midnight, midnight next day)` |
-| `HourSpan() Span` | `[hour boundary, next hour)` |
-
-#### Week boundaries (`WeekStart`)
-
-Two week definitions are supported. **Default is ISO 8601 (Monday start).**
+One entry point — **`Span(p Precision)`** — no separate interface or `WeekStart` type.
 
 ```go
-type WeekStart uint8
+type Precision uint8
 
 const (
-    MondayWeek WeekStart = iota // ISO 8601 — default
-    SundayWeek                  // US-style weeks starting Sunday 00:00 UTC
+    Year Precision = iota
+    Month
+    Week          // Span/Truncate: uses DefaultWeekStart
+    Day
+    Hour
+    Minute
+    Second
+    Millisecond
+    Nanosecond
+
+    // Week-boundary selectors — valid input to Truncate/Span; stored precision → Week
+    MondayWeek    // ISO week (Mon 00:00 UTC → next Mon), explicit
+    SundayWeek    // US-style week (Sun 00:00 UTC → next Sun), explicit
 )
 
-var DefaultWeekStart = MondayWeek
+var DefaultWeekStart = MondayWeek // Precision value; used when arg is Week
 ```
 
-| Mode | Week span `[Start, End)` | Notes |
-|------|--------------------------|-------|
-| `MondayWeek` | ISO week: Mon 00:00 UTC → next Mon 00:00 | Week-number rules follow ISO 8601 |
-| `SundayWeek` | Sun 00:00 UTC → next Sun 00:00 | Calendar weeks aligned to Sunday |
+| Call | Result |
+|------|--------|
+| `c.Span(chron.Year)` | `[Jan 1, Jan 1 next year)` |
+| `c.Span(chron.Month)` | `[1st 00:00, 1st next month)` |
+| `c.Span(chron.Week)` | Week containing `c`; uses `DefaultWeekStart` |
+| `c.Span(chron.MondayWeek)` | ISO week, explicit (even if default is Sunday) |
+| `c.Span(chron.SundayWeek)` | US-style week, explicit |
+| `c.Span(chron.Day)` | `[midnight, midnight next day)` |
+| `c.Span(chron.Hour)` | `[hour boundary, next hour)` |
+| `c.Span(c.Precision())` | Bucket at this value's declared precision (e.g. parsed `"2026-02"`). If precision is `Week`, uses `DefaultWeekStart` |
 
-**Where to set it**
+`Span(p).Start` and `Truncate(p)` share the same boundary rules and the same precision
+normalization: week-boundary selectors store `Week` on the resulting `Chron`.
+
+`Span` stores only `Start` and `End`. Week boundary choice is input at construction time;
+the interval is self-contained afterward.
+
+**Why one enum, no interface.** `SpanUnit` existed only so Go could accept two types in
+one method. A single `Precision` enum with week-boundary selectors at the end is simpler,
+matches the interfaceless v1 goal, and keeps `c.Span(chron.SundayWeek)` without a wrapper
+type. `Duration` keeps its own `Unit` enum — different concern (offsets, not buckets).
+
+**Stored vs input precision.** Values stored on `Chron` (`parse`, `Truncate`, `Add`) are
+always `Year` … `Nanosecond`. `MondayWeek` / `SundayWeek` are input-only aliases that
+normalize to `Week` when truncating or when taking `Span(p).Start`.
+
+#### Week boundaries
+
+| Mode | Constant | Week span `[Start, End)` |
+|------|----------|--------------------------|
+| Default / explicit ISO | `Week` (via `DefaultWeekStart`) or `MondayWeek` | Mon 00:00 UTC → next Mon |
+| Explicit US | `SundayWeek` | Sun 00:00 UTC → next Sun |
+
+**Where week start is chosen**
 
 | Mechanism | Scope | Use when |
 |-----------|-------|----------|
-| `DefaultWeekStart` | Package / process | App-wide locale default |
-| `c.WithWeekStart(w)` | This `Chron` value | User preference stored on a record |
-| `c.WeekSpanFrom(w)` | Single call | One-off report without mutating `c` |
-| `FromTime(t, opts...)` / `ParseAuto` (future) | At construction | Ingest knows locale up front |
-
-Zero `weekStart` on `Chron` means "use `DefaultWeekStart`" — constructors do not need
-to set it unless overriding.
+| `DefaultWeekStart` | Package / process | App-wide default for `Span(Week)` / `Truncate(Week)` |
+| `c.Span(chron.SundayWeek)` | Single call | Explicit boundaries; per-user locale from app state |
+| App stores `Precision` on user/settings | Domain model | e.g. `SundayWeek`; pass to `Truncate(p)` or `Span(p)` — not on `Chron` |
 
 ```go
-// Default ISO week (Monday)
-chron.Now().WeekSpan()
+// Default ISO week (Monday) via Week + DefaultWeekStart
+anchor := chron.Now().Truncate(chron.Week)   // precision → Week
 
-// App prefers Sunday weeks
+// Explicit US week — boundary from SundayWeek, precision stored as Week
+us := chron.Now().Truncate(chron.SundayWeek) // precision → Week, not SundayWeek
+
+// Same via Span
+usStart := chron.Now().Span(chron.SundayWeek).Start
+
+// App prefers Sunday weeks globally
 chron.DefaultWeekStart = chron.SundayWeek
+chron.Now().Truncate(chron.Week)
 
-// Per-user setting on one anchor
-userAnchor := chron.FromTime(t).WithWeekStart(chron.SundayWeek)
-userAnchor.WeekSpan()
+// Per-user setting — app layer
+userWeek := user.Settings.WeekStart // chron.SundayWeek (input selector)
+c.Truncate(userWeek)
 
-// Explicit for one query, anchor unchanged
-c.WeekSpanFrom(chron.SundayWeek)
+// Explicit ISO week regardless of DefaultWeekStart
+c.Truncate(chron.MondayWeek)
 ```
 
 `Weeks(n)` in `Duration` remains **seven calendar days** via `AddDate` — it does not
-follow `WeekStart`. Only **span boundaries** (`WeekSpan`, `StartOfWeek`) use `WeekStart`.
+follow week boundary selectors. **`Span` / `Truncate`** with `Week`, `MondayWeek`, or
+`SundayWeek` use week boundaries.
 
-### Same-unit comparison (optional v1)
+### Same-unit comparison (deferred — see [Future features](#future-features-and-options))
 
 | Method | Purpose |
 |--------|---------|
@@ -382,24 +414,41 @@ follow `WeekStart`. Only **span boundaries** (`WeekSpan`, `StartOfWeek`) use `We
 
 ```go
 anchor := chron.Now()
-start := anchor.StartOfMonth()
+start := anchor.Truncate(chron.Month)
 later := anchor.Add(chron.Days(5))
 if anchor.SameMonth(later) { /* ... */ }
 ```
 
-### Instant comparison (stdlib semantics)
+### Instant comparison (embedded `time.Time`)
+
+`Chron` embeds `time.Time`. **No chron-specific comparison methods** — no
+`BeforeInstant`, no precision-aware overrides of `Before` / `After` / `Equal`. Instant
+ordering is always nanosecond point comparison, identical to stdlib.
+
+Promoted from the embed (same signatures and semantics as `time.Time`):
 
 | Method | Semantics |
 |--------|-----------|
-| `Equal(other Chron) bool` | Same instant (nanosecond) |
-| `BeforeInstant(other Chron) bool` | Strict point ordering |
-| `AfterInstant(other Chron) bool` | Strict point ordering |
+| `Equal(u time.Time) bool` | Same instant |
+| `Before(u time.Time) bool` | Strict point ordering |
+| `After(u time.Time) bool` | Strict point ordering |
+| `Compare(u time.Time) int` | Stdlib three-way compare |
 
-Names are intentionally verbose in v1 sketch to avoid overriding embedded
-`Before`/`After` with different meaning. **Open question:** embed `time.Time` and use
-`BeforeInstant` only, or override `Before`/`After` when `precision != Nanosecond`?
-Recommendation: **keep stdlib `Before`/`After` as instant comparison always**; use
-`Span` for intervals.
+Compare two `Chron` values via the other's embedded instant:
+
+```go
+if event.Before(anchor.Time) { /* instant ordering */ }
+if deadline.Equal(cutoff.Time) { /* ... */ }
+```
+
+`precision` is ignored for these calls — `"2026-02"` (month anchor) compared with
+`Before` is still Feb 1 00:00 UTC vs the other instant, not "is inside February."
+For month/day/year membership, use `Span` or `SameMonth` / `SameDay` / `SameYear`.
+
+**Naming split:** chron-only APIs use names stdlib does not (`Span`, `SameMonth`,
+`Contains`, `Overlaps`, …). `Span` methods are interval logic only and do not shadow
+`time.Time`. The deliberate shadow is `Add(chron.Duration)` (calendar-aware), not
+comparison.
 
 ### Location / display
 
@@ -412,26 +461,64 @@ Storage stays UTC. Formatting for humans converts at the edge.
 
 ### Serialization and I/O
 
+**Asymmetric I/O (same pattern as `Duration`):** canonical ISO on marshal, lenient
+registry on unmarshal. Human-friendly strings (`"Jan 2026"`, `"02/2026"`) are accepted
+on **read** via `ParseFormats`; they are never canonical **write** output. Display for
+people uses `Format` / `InLocation` at the UI edge — not JSON.
+
 | Method | Purpose |
 |--------|---------|
-| `MarshalJSON() ([]byte, error)` | Format according to `precision` |
-| `UnmarshalJSON([]byte) error` | Try registered formats; infer precision when possible |
+| `MarshalJSON() ([]byte, error)` | Format at declared `precision` (ISO canonical) |
+| `UnmarshalJSON([]byte) error` | Try registered layouts; set `precision` from match |
 | `Scan(src any) error` | `database/sql` driver |
 | `Value() (driver.Value, error)` | `database/sql` driver |
 
-**Parse format registry** (global or package-level):
+**Marshal** — one canonical string per `precision`:
+
+| `Precision` | JSON example | Layout |
+|-------------|--------------|--------|
+| `Year` | `"2026"` | `2006` |
+| `Month` | `"2026-02"` | `2006-01` |
+| `Day` | `"2026-02-15"` | `2006-01-02` |
+| `Hour` | `"2026-02-15T14"` | `2006-01-02T15` |
+| `Minute` / `Second` | RFC3339 (no fractional) | `time.RFC3339` |
+| `Nanosecond` | RFC3339Nano | `time.RFC3339Nano` |
+
+Full instants from `Now` / `FromTime` marshal as RFC3339Nano unless truncated.
+
+**Unmarshal / parse** — precision is **implied by the layout that matched**, not passed
+separately. `Parse`, `ParseFrom`, and `UnmarshalJSON` all use the same rule:
+
+1. Try layouts (registry order for `Parse` / `UnmarshalJSON`; explicit layout for
+   `ParseFrom`).
+2. On success, set `precision` from the **finest unit in that layout** (e.g.
+   `"2006-01"` → `Month`; `"2006-01-02"` → `Day`; RFC3339 with sub-second →
+   `Nanosecond`).
+3. Normalize the instant to UTC (anchor = start of the matched unit when coarser than
+   nanosecond — e.g. `"2026-02"` → Feb 1 00:00:00 UTC).
 
 ```go
 var ParseFormats = []string{
     time.RFC3339Nano,
+    time.RFC3339,
+    "2006-01-02T15:04:05",
+    "2006-01-02T15",
     "2006-01-02",
     "2006-01",
-    // append for app-specific formats
+    "2006",
+    // app-specific read-only layouts, e.g. "Jan 2006", "01/02/2006"
 }
 ```
 
-Unmarshal picks the first matching layout or returns a clear error. Precision is set
-from the narrowest layout that matched (e.g. `"2006-01"` → `Month` precision).
+`Parse` / `UnmarshalJSON` pick the **first** matching layout (register narrowest /
+most specific layouts before broader ones when ambiguity matters). `ParseFrom(layout, s)` uses
+the caller's layout and applies the same precision-from-layout mapping.
+
+```go
+c, _ := chron.Parse("2026-02")    // Month precision, anchor Feb 1 UTC
+c, _ := chron.Parse("Jan 2026")   // same, if "Jan 2006" is in ParseFormats
+c.MarshalJSON()                       // []byte(`"2026-02"`) — canonical, not "Jan 2026"
+```
 
 ---
 
@@ -477,12 +564,16 @@ NewDuration(years, months, weeks, days int, clock time.Duration) Duration
 | `Weeks(n int) Duration` | `AddDate(0, 0, 7*n)` | Always calendar days, never `7×24h` fixed (see resolved decisions) |
 | `Days(n int) Duration` | `AddDate(0, 0, n)` | Calendar days |
 | `Hours(n int) Duration` | `Add(n * time.Hour)` | Fixed clock |
-| `Minutes(n int) Duration` | `Add(n * time.Minute)` | Fixed clock |
-| `Seconds(n int) Duration` | `Add(n * time.Second)` | Fixed clock |
-| `Milliseconds(n int) Duration` | `Add(n * time.Millisecond)` | Fixed clock |
-| `Microseconds(n int) Duration` | `Add(n * time.Microsecond)` | Fixed clock |
-| `Nanoseconds(n int) Duration` | `Add(n * time.Nanosecond)` | Fixed clock |
+| `Min(n int) Duration` | `Add(n * time.Minute)` | Fixed clock |
+| `Sec(n int) Duration` | `Add(n * time.Second)` | Fixed clock |
+| `Millis(n int) Duration` | `Add(n * time.Millisecond)` | Fixed clock |
+| `Micros(n int) Duration` | `Add(n * time.Microsecond)` | Fixed clock |
+| `Nanos(n int) Duration` | `Add(n * time.Nanosecond)` | Fixed clock |
 | `Clock(d time.Duration) Duration` | `Add(d)` | Raw stdlib duration (escape hatch) |
+
+Sub-second constructors use readable names (`Millis`, `Micros`, `Nanos`) in Go code.
+ISO duration **strings** use `ms`, `µs` (marshal), and `ns`; parse also accepts `us` for
+microseconds.
 
 ### Building `Duration`: constructors or parse
 
@@ -492,24 +583,22 @@ There is one apply path — no parallel `Add` overloads for strings.
 | Source | API | Example |
 |--------|-----|---------|
 | Go code | Unit constructors | `chron.Months(3).Days(5)` |
-| Config, query params, JSON | `ParseDuration` | `chron.ParseDuration("P1Y3M4DT12H")` |
+| Inline string (panic on error) | `Duration(s)` | `chron.Duration("14d")` |
+| Boundaries / JSON (errors) | `ParseDuration` | `chron.ParseDuration("P1Y3M4DT12H")` |
 | JSON struct field | `Duration.UnmarshalJSON` | string or structured form |
 
 ```go
-// Both paths → same type → same Add
-c.Add(chron.Weeks(2))
-d, err := chron.ParseDuration("P2W")
+// String constructor — panics on invalid input (tests, literals, c.Add inline)
+c.Add(chron.Duration("P2W"))
+c.Add(chron.Duration("pt4h500ms"))
+
+// Explicit error handling at I/O boundaries
+d, err := chron.ParseDuration(cfg.TrialLength)
 c.Add(d)
 ```
 
-Optional convenience when the string is inline (parse errors propagate):
-
-```go
-func (c Chron) AddParsed(s string) (Chron, error)
-func MustDuration(s string) Duration   // panic on error — tests, init
-```
-
-Prefer `ParseDuration` at boundaries; use `AddParsed` only when it reads cleaner.
+`Duration(s string) Duration` shares the type name (valid Go); it wraps `ParseDuration`
+and panics on failure. Prefer `ParseDuration` where errors should propagate.
 
 ### ISO 8601 duration parse and format
 
@@ -532,21 +621,24 @@ fraction on `S`**:
 Both `.` and `,` are accepted as the decimal separator on parse (ISO allows either).
 **Marshal uses `.`** (ASCII period).
 
-#### Chron extensions: `ms`, `us`, `ns`
+#### Chron extensions: `ms`, `µs`, `ns`
 
-For readability, chron also accepts and emits explicit sub-second units (common in
-config, not strict ISO):
+For readability, chron also accepts explicit sub-second units in the time segment (common
+in config, not strict ISO):
 
 | Unit | Marshal (canonical) | Unmarshal (case-insensitive) | Maps to |
 |------|---------------------|------------------------------|---------|
 | milliseconds | `500ms` | `ms`, `MS`, `Ms`, … | `clock` |
-| microseconds | `250us` | `us`, `US`, `µs`, `μs` | `clock` |
+| microseconds | `250µs` | `us`, `US`, `µs`, `μs` | `clock` |
 | nanoseconds | `100ns` | `ns`, `NS`, … | `clock` |
 
-These appear only in the **time segment** (after `t` / `T`), alongside `h`, `m`, `s`.
-Example: `pt4h30m5s500ms250us100ns` (marshal) ↔ same string with any casing on parse.
+**Microseconds:** parse accepts **`us`** (ASCII) or **`µs`** / **`μs`** (Unicode mu
+variants). **Marshal and `String()` always emit `µs`** (U+00B5) — never `us`.
 
-Prefer **`ms` / `us` / `ns` in marshal** when the offset is a whole number of those
+These appear only in the **time segment** (after `t` / `T`), alongside `h`, `m`, `s`.
+Example marshal: `pt4h30m5s500ms250µs100ns` ↔ parse accepts `250us`, `250µs`, or `250μs`.
+
+Prefer **`ms` / `µs` / `ns` in marshal** when the offset is a whole number of those
 units; use **fractional `s`** when that is the natural ISO form (e.g. `pt0.001s` for 1 ms
 is also valid on marshal if sub-second is purely fractional).
 
@@ -554,14 +646,14 @@ is also valid on marshal if sub-second is purely fractional).
 
 | Direction | Rule |
 |-----------|------|
-| **Marshal** (`FormatDuration`, `MarshalJSON`) | **Lowercase** designators: `p`, `y`, `m`, `d`, `w`, `t`, `h`, `s`, `ms`, `us`, `ns` |
-| **Unmarshal** (`ParseDuration`, `UnmarshalJSON`) | **Case-insensitive** for all designators (`P`/`p`, `Y`/`y`, `PT`/`pt`, `MS`/`ms`, …) |
+| **Marshal** (`FormatDuration`, `String`, `MarshalJSON`) | Lowercase designators: `p`, `y`, `m`, `d`, `w`, `t`, `h`, `s`, `ms`, **`µs`**, `ns` |
+| **Unmarshal** (`ParseDuration`, `Duration(s)`, `UnmarshalJSON`) | Case-insensitive; **`us`** and **`µs`** / **`μs`** accepted for microseconds |
 
 Strict ISO uppercase input (`P1Y2M3DT4H30M5S`) parses correctly; output is chron
 canonical lowercase (`p1y2m3dt4h30m5s`).
 
 **Ambiguity note:** `m` before `t` = months; `m` after `t` = minutes — same as ISO.
-Extension units are multi-letter (`ms`, `us`, `ns`) so they do not clash with minutes.
+Extension units are multi-letter (`ms`, `µs`, `ns`; parse also `us`) so they do not clash with minutes.
 
 #### Accepted input (lenient)
 
@@ -575,7 +667,7 @@ Extension units are multi-letter (`ms`, `us`, `ns`) so they do not clash with mi
 | `12H` | `PT12H` | bare clock unit → prepend `PT` |
 | `P2W` / `p2w` | as-is | `Weeks(2)` |
 | `PT0.001S` | fractional seconds | 1 ms in `clock` |
-| `PT4H500ms` / `pt4h500ms` | extension | `Hours(4)` + 500 ms |
+| `PT4H500ms` / `pt4h500ms250us` | extension; `us`/`µs`/`μs` on parse | `Hours(4)` + 500 ms (+ µs if present) |
 | `-P1D` | as-is | `Neg()` on result |
 
 Normalization before parse:
@@ -585,14 +677,15 @@ Normalization before parse:
 3. Bare clock unit at start of period body → insert `t` (`12h` → `pt12h`).
 
 **Errors:** fractional **calendar** components (`P1.5Y`, `P2.5M`); `W` combined with
-`Y`/`M`/`D` in one string (ISO rule). Fractional **`s`** and **`ms`/`us`/`ns`** are
-supported.
+`Y`/`M`/`D` in one string (ISO rule). Fractional **`s`** and **`ms`/`µs`/`us`/`ns`** are
+supported on parse.
 
 | Function | Purpose |
 |----------|---------|
-| `ParseDuration(s string) (Duration, error)` | ISO + extensions → `Duration` |
-| `FormatDuration(d Duration) string` | `Duration` → lowercase canonical string |
-| `MustDuration(s string) Duration` | Parse or panic |
+| `Duration(s string) Duration` | Parse string; **panic** on error — literals, tests, inline `Add` |
+| `ParseDuration(s string) (Duration, error)` | Same grammar; errors returned |
+| `FormatDuration(d Duration) string` | Canonical string (`µs` for microseconds) |
+| `(Duration) String() string` | Same as `FormatDuration` |
 | `(Duration) MarshalJSON()` | `FormatDuration` → JSON string |
 | `(Duration) UnmarshalJSON([]byte) error` | JSON string → `ParseDuration` |
 
@@ -603,9 +696,10 @@ type TrialConfig struct {
     Length chron.Duration `json:"length"`
 }
 
-// Unmarshal accepts: "14d", "P14D", "pt500ms", "PT0.5S"
-// Marshal emits:       "p14d", "pt500ms", "pt0.5s"
+// Unmarshal accepts: "14d", "P14D", "pt500ms", "250us", "250µs", "PT0.5S"
+// Marshal / String emits: "p14d", "pt500ms", "pt0.5s", "250µs" (never "us")
 signupAt.Add(cfg.Length)
+signupAt.Add(chron.Duration("P14D"))
 ```
 
 ### Apply order
@@ -648,16 +742,17 @@ Chaining builds composites: `Years(1).Months(3)` merges fields into one struct.
 chron.Date(2026, 1, 31).Add(chron.Months(1))
 
 // Billing: store the offset, apply when anchor is known
-expires := signupAt.Add(chron.MustDuration("14D")) // P prefix optional
+expires := signupAt.Add(chron.Duration("14D")) // panic if invalid
 
-// Full ISO from config (any casing on input)
+// Full ISO from config (any casing on input; us or µs for microseconds)
 d, _ := chron.ParseDuration("P1Y3M4DT12H")
 c.Add(d)
 
 // Sub-second: strict ISO fractional s, or extension units
-chron.MustDuration("PT0.001S")       // 1 ms
-chron.MustDuration("pt4h500ms")      // marshal form; PT4H500MS also parses
-chron.MustDuration("PT1.000000001S") // 1 ns via fractional seconds
+chron.Duration("PT0.001S")       // 1 ms
+chron.Duration("pt4h500ms")      // marshal form; PT4H500MS also parses
+chron.Duration("pt4h250µs")      // µs on input; us also parses
+chron.Duration("PT1.000000001S") // 1 ns via fractional seconds
 
 // Mixed — one call replaces AddDate + Add
 c.Add(chron.Years(1).Months(3).Hours(12))
@@ -678,7 +773,7 @@ type Span struct {
 
 Half-open intervals match common range semantics (SQL `BETWEEN` pitfalls aside), avoid
 "last nanosecond of the day" ambiguity, and make `Contains` straightforward:
-`!t.Before(start) && t.Before(end)`.
+`!t.Before(start.Time) && t.Before(end.Time)`.
 
 ### Why a separate type?
 
@@ -695,18 +790,18 @@ A `Chron` with `precision: Month` records *intent* for I/O; a `Span` is the comp
 ### Construction
 
 Package-level functions when building a span from two endpoints or for validation.
-Calendar buckets come from **`Chron` methods** (`c.MonthSpan()`).
+Calendar buckets come from **`c.Span(...)`** (e.g. `c.Span(chron.Month)`).
 
 | Function | Purpose |
 |----------|---------|
-| `NewSpan(start, end Chron) (Span, error)` | Arbitrary range; error if `!start.Before(end)` |
+| `NewSpan(start, end Chron) (Span, error)` | Arbitrary range; error if `!start.Before(end.Time)` |
 | `MustSpan(start, end Chron) Span` | Panic on invalid — for tests and constants |
 
 Precision-based parsing:
 
 ```go
-c, _ := chron.ParseAuto("2026-02")   // Chron with Precision == Month
-feb := c.MonthSpan()                 // Span{2026-02-01, 2026-03-01}
+c, _ := chron.Parse("2026-02")   // Chron with Precision == Month
+feb := c.Span(c.Precision())     // Span{2026-02-01, 2026-03-01}
 ```
 
 ### Accessors
@@ -729,14 +824,14 @@ feb := c.MonthSpan()                 // Span{2026-02-01, 2026-03-01}
 Examples:
 
 ```go
-feb := chron.Date(2026, 2, 15).MonthSpan()
+feb := chron.Date(2026, 2, 15).Span(chron.Month)
 event := chron.FromTime(someEventTime)
 if feb.Contains(event) {
     // event in February 2026 (UTC)
 }
 
-week := chron.Now().WeekSpan()              // ISO Monday default
-usWeek := chron.Now().WeekSpanFrom(chron.SundayWeek)
+week := chron.Now().Span(chron.Week)              // DefaultWeekStart (ISO Monday)
+usWeek := chron.Now().Span(chron.SundayWeek)
 if week.Overlaps(maintenanceWindow) {
     // ...
 }
@@ -745,7 +840,7 @@ if week.Overlaps(maintenanceWindow) {
 db.Query(`... WHERE at >= $1 AND at < $2`, feb.Start.AsTime(), feb.End.AsTime())
 ```
 
-### Span arithmetic (optional v1)
+### Span arithmetic (deferred — see [Future features](#future-features-and-options))
 
 | Method | Purpose |
 |--------|---------|
@@ -753,12 +848,12 @@ db.Query(`... WHERE at >= $1 AND at < $2`, feb.Start.AsTime(), feb.End.AsTime())
 | `Extend(end Chron) Span` | Widen end (error if before current start) |
 | `Intersection(other Span) (Span, bool)` | Common sub-interval, if any |
 
-Defer `Extend` / `Intersection` if needed; `Shift` uses `Add` on both endpoints.
+Defer `Extend` / `Intersection` until needed; `Shift` is the likely first addition.
 
-### Serialization (optional v1)
+### Serialization (deferred — see [Future features](#future-features-and-options))
 
 Spans may JSON as `{ "start": "...", "end": "..." }` or a single string when tied to
-a calendar unit (`"2026-02"` → `MonthSpan()`). Exact shape TBD in `chron_v1_parsing.md`.
+a calendar unit (`"2026-02"` → `Span(Month)`). Wire shape TBD in `chron_v1_parsing.md`.
 
 ---
 
@@ -774,23 +869,107 @@ a calendar unit (`"2026-02"` → `MonthSpan()`). Exact shape TBD in `chron_v1_pa
 
 ---
 
-## Open questions
+## Future features and options
 
-1. **JSON shape for `Chron`.** Should month-precision serialize as `"2026-02"` or always
-   RFC3339? Proposal: serialize at declared precision; always accept multiple on input.
+Items deferred from v1 or noted elsewhere in this doc. None block the initial
+implementation; add when a concrete use case appears.
 
-2. **Comparison API naming on `Chron`.** `BeforeInstant` vs overriding embedded methods —
-   pick one story and document it prominently.
+### Calendar comparison helpers
 
-3. **Zero values.** `Chron{}` and `Span{}` invalid; provide `IsZero() bool` on both.
+| Item | Notes |
+|------|-------|
+| `SameYear` / `SameMonth` / `SameDay` | Convenience over `Span` + `Contains` or truncation equality. Optional v1 — defer if `Span(Month).Contains(c)` is enough. |
+| `SameWeek(other Chron, p Precision) bool` | Requires explicit week constant (`MondayWeek` / `SundayWeek` / `Week` + default). Compare via `Span(p)` on both anchors. |
 
-4. **`SameUnit` helpers.** Covered by optional `SameMonth` / `SameDay` — include in v1 or defer?
+### `Span` API and I/O
 
-5. **`SameWeek` helper.** Should it respect `WeekStart` / `WeekSpanFrom` semantics?
+| Item | Notes |
+|------|-------|
+| `Span.Shift(d Duration)` | Move both endpoints by `d`. Straightforward; include when interval arithmetic is needed. |
+| `Span.Extend(end Chron)` | Widen end; error if new end precedes start. Defer unless editing ranges in place is common. |
+| `Span.Intersection(other)` | Common sub-interval `(Span, bool)`. Defer unless overlap logic needs narrowing, not just detection. |
+| **Span JSON shape** | Object `{ "start", "end" }` vs single calendar string (`"2026-02"` → month span). Detail in `chron_v1_parsing.md`. |
+| Span `MarshalJSON` / `UnmarshalJSON` | Optional v1; same asymmetric I/O rules as `Chron` when added. |
+
+### Construction and parsing
+
+| Item | Notes |
+|------|-------|
+| `FromTimeIn(t, loc)` | Preserve local wall time when wrapping `time.Time` instead of normalizing via `.UTC()` first. |
+| **Strict vs lenient parse modes** | Global or per-call tightening of `ParseFormats` / `Parse`. `chron_v1_parsing.md`. |
+| **Custom parse plugins** | Registry of `func(string) (Chron, error)` — not a `Parser` interface unless multiple backends exist. |
+| `Add(chron.Duration("P2W1D"))` | Inline string duration via panic constructor |
+| App-specific `ParseFormats` | Human layouts (`"Jan 2006"`, `"02/2026"`) on read only; never canonical marshal. |
+
+### Additional types
+
+| Item | Notes |
+|------|-------|
+| `Date` (date-only, no clock) | Separate concrete type with conversion to/from `Chron` and `Span` if day-precision `Chron` is insufficient in APIs. |
+| Per-precision struct types | Original library had `Year` … `Chron` lattice; v1 uses one `Chron` + `Precision` enum. Revisit only if metadata proves inadequate. |
+
+### Ecosystem and tooling
+
+| Item | Notes |
+|------|-------|
+| **`chron_v1_precision.md`** | `Precision` enum, truncation table, layout ↔ precision mapping. |
+| **`chron_v1_parsing.md`** | Format registry, duration grammar edge cases, Span wire format. |
+| **Mock / injectable clock** | Small `Clock` interface in test helper or `clock` package — not in core v1. |
+| **Scheduler / cron engine** | Out of scope; may consume `Chron` later. |
+| **Business-day / holiday calendars** | Named calendar dates in problem table; needs a richer model than `Chron` + `Span`. |
+| **Locale-aware formatting** | Stay in app layer via `InLocation` + `Format`; core remains UTC + ISO I/O. |
+
+### Interfaces (only if forced)
+
+v1 stays interfaceless. Extract an interface when two or more unrelated implementations
+exist and callers must accept either — same stance as the original chron rewrite.
 
 ---
 
 ## Resolved decisions
+
+### Chron JSON and parse I/O
+
+- **Marshal:** precision-aware ISO strings (`"2026-02"` for month, not RFC3339 midnight
+  and not human month names). Same canonical shape for `MarshalJSON`, `Value()`, and
+  `Format` when using the precision's default layout.
+- **Unmarshal / parse:** lenient — try registered layouts; accept human-friendly forms on
+  input only.
+- **Precision from layout:** whichever layout successfully parses the input sets
+  `precision` automatically (`Parse`, `ParseFrom`, `UnmarshalJSON`, `Scan`). No separate
+  precision field in JSON for the common `string` field case.
+- **Display:** `"Jan 2026"` and locale-specific forms are out of scope for canonical I/O;
+  use `Format` after `InLocation` at the application edge.
+
+### Instant comparison (`Chron`)
+
+- **Use embedded `time.Time` methods** — `Before`, `After`, `Equal`, `Compare` with
+  stdlib semantics. No alternate names (`BeforeInstant`, …) and no precision-aware
+  overrides.
+- **Two `Chron` values:** `a.Before(b.Time)` (or compare underlying instants another
+  way). Behavior matches `a.Time.Before(b.Time)`.
+- **Intervals:** `Span.Contains` / `Overlaps` / `Adjacent` and calendar helpers
+  (`SameMonth`, …). Those names do not overlap `time.Time`; do not use `Before` for
+  bucket membership.
+
+### Zero values (`Chron`, `Span`)
+
+- **`Chron{}` and `Span{}` are invalid** — never a meaningful instant or interval.
+  Constructors and parsers return populated values or an error.
+- **`IsZero() bool` on both types** — primary API for callers:
+  - `Chron`: `return c.Time.IsZero()` (delegates to embedded `time.Time`)
+  - `Span`: `return s.Start.IsZero() && s.End.IsZero()`
+- **`reflect`:** no registration or special support required. `reflect.Value.IsZero()`
+  walks struct fields; embedded zero `time.Time` is already treated as zero, so
+  `reflect.ValueOf(Chron{}).IsZero()` is `true`. **Reflect does not call your
+  `IsZero()` method** — keep the method aligned with field-wise zero (same rule as
+  above) so direct calls and reflection agree.
+- **`encoding/json` `omitempty`:** value-typed struct fields are **never** omitted
+  (`isEmptyValue` returns `false` for structs). Options for optional JSON fields:
+  - `*chron.Chron` / `*chron.Span` (`nil` = absent), or
+  - `MarshalJSON` emits JSON `null` when `IsZero()` (recommended for value fields).
+- **`database/sql`:** `Value()` returns `NULL` when `IsZero()`; `Scan` of `NULL` leaves
+  the target zero.
 
 ### Precision after arithmetic
 
@@ -819,25 +998,24 @@ c.Add(chron.Weeks(1))                    // AddDate(0, 0, 7)
 c.Add(chron.Clock(7 * 24 * time.Hour))   // fixed 168h — different meaning
 ```
 
-### Week span boundaries (`WeekStart`)
+### Week span boundaries
 
-- **`MondayWeek`** (default): ISO 8601 weeks — Monday 00:00 UTC through next Monday
-  (exclusive). `DefaultWeekStart = MondayWeek`.
-- **`SundayWeek`**: Sunday 00:00 UTC through next Sunday (exclusive).
-- **Configure at:** package default (`DefaultWeekStart`), per-`Chron` (`WithWeekStart`),
-  or per call (`WeekSpanFrom(w)`).
-- **`Weeks(n)` duration** is unchanged — always `AddDate(0,0,7n)` calendar days; only
-  span/start-of-week boundaries use `WeekStart`.
+- **`Week`** — `Span(Week)` / `Truncate(Week)` use package `DefaultWeekStart` (`MondayWeek` by default); result precision is `Week`.
+- **`MondayWeek` / `SundayWeek`** — input selectors for explicit boundaries; `Truncate` / `Span` normalize stored precision to `Week`.
+- **Per-user locale** — app stores a week-boundary selector (`SundayWeek`, etc.); pass to `Truncate(p)` or `Span(p)` — not on `Chron`.
+- **`Span` struct** — only `[Start, End)`; week choice is not retained after construction.
+- **`Weeks(n)` duration** — unchanged; always `AddDate(0,0,7n)` calendar days.
 
 ### ISO 8601 duration strings (v1)
 
 - **`ParseDuration` / `FormatDuration`** for ISO 8601 calendar + clock durations.
 - **Sub-second (ISO):** fractional `s` only (`pt0.001s`, `pt1.5s`); no `MS`/`NS` in strict ISO.
-- **Sub-second (chron extensions):** `ms`, `us`, `ns` in time segment; marshal lowercase;
-  unmarshal case-insensitive (`500MS` OK).
-- **Marshal:** lowercase designators (`p1y2m3dt4h30m5s500ms`); **unmarshal:** any case.
+- **Sub-second (chron extensions):** `ms`, `µs` (marshal), `ns` in time segment; parse
+  also accepts `us` and Unicode `μs`; unmarshal case-insensitive (`500MS` OK).
+- **Marshal / String:** lowercase designators (`p1y2m3dt4h30m5s500ms250µs`); **unmarshal:** any case.
 - **Lenient input:** leading `p` optional; bare clock units get `t`.
-- **Single apply path:** constructors and parsed strings → `Duration` → `c.Add(d)`.
+- **Single apply path:** constructors, `Duration(s)`, or `ParseDuration` → `c.Add(d)`.
+- **`Duration(s)`** — panic constructor for inline use; **`ParseDuration`** returns errors.
 - **`p…w` weeks** → `Weeks(n)` (calendar days).
 - **JSON:** `Duration` uses `MarshalJSON` / `UnmarshalJSON` with same rules.
 
@@ -847,8 +1025,8 @@ c.Add(chron.Clock(7 * 24 * time.Hour))   // fixed 168h — different meaning
 
 ```go
 // Parse month intent → Chron; derive full window → Span
-expiry, err := chron.ParseAuto("2026-02")
-feb := expiry.MonthSpan()
+expiry, err := chron.Parse("2026-02")
+feb := expiry.Span(expiry.Precision())
 
 // Domain logic: is now inside the billing month?
 if feb.Contains(chron.Now()) {
@@ -861,11 +1039,11 @@ db.Exec(`INSERT INTO periods (start_at, end_at) VALUES ($1, $2)`,
 
 // Calendar math: feb.End is Mar 1 00:00 UTC (exclusive end = next period start)
 nextMonth := feb.End
-nextFeb := feb.Start.Add(chron.Years(1)).MonthSpan()
-trialEnd := signupAt.Add(chron.MustDuration("P2W1D")) // or Weeks(2).Days(1) in code
+nextFeb := feb.Start.Add(chron.Years(1)).Span(chron.Month)
+trialEnd := signupAt.Add(chron.Duration("P2W1D")) // or Weeks(2).Days(1) in code
 
-// Explicit instant comparison (not span membership)
-if chron.Now().BeforeInstant(deadline) {
+// Instant comparison (embedded time.Time — not span membership)
+if chron.Now().Before(deadline.Time) {
     // ...
 }
 ```
@@ -877,15 +1055,7 @@ if chron.Now().BeforeInstant(deadline) {
 - `chron_v1_precision.md` — `Precision` enum, truncation table, serialization mapping
 - `chron_v1_parsing.md` — format registry, ISO 8601 duration parse, strict vs lenient modes
 
-## When we might add interfaces (later, if ever)
-
-| Need | Likely approach |
-|------|-----------------|
-| Mock clock in tests | Small `Clock` interface in a `_test` helper or separate `clock` package |
-| Custom parse plugins | Registry of `func(string) (Chron, error)` functions, not a `Parser` interface |
-
-Default stance: add concrete types and functions first; extract an interface only when
-two or more unrelated implementations exist and callers need to accept either.
+See [Future features and options](#future-features-and-options) for the full deferred backlog.
 
 ---
 
@@ -903,3 +1073,12 @@ two or more unrelated implementations exist and callers need to accept either.
 | 2026-06-24 | ISO 8601 `ParseDuration` (optional `P`), constructors + `c.Add(d)` unified |
 | 2026-06-24 | Duration I/O: fractional `s` + `ms`/`us`/`ns`; marshal lowercase, parse any case |
 | 2026-06-24 | `WeekStart`: ISO Monday default; Sunday option via default, `WithWeekStart`, `WeekSpanFrom` |
+| 2026-06-25 | Chron I/O: canonical ISO marshal; lenient parse; precision implied by matched layout |
+| 2026-06-25 | Instant compare: embedded `time.Time` `Before`/`After`/`Equal`; `Span` for intervals |
+| 2026-06-25 | Zero values: `IsZero()` on `Chron`/`Span`; reflect needs no hook; JSON `null` when zero |
+| 2026-06-25 | Parse API: `Parse(s)` registry default; explicit layout via `ParseFrom(layout, s)` |
+| 2026-06-25 | `Span(SpanUnit)`: `Precision` or `WeekStart`; drop named spans; `WeekStart` not on `Chron` |
+| 2026-06-25 | Drop `WithPrecision` and `StartOf*`; `Truncate(p)` sets precision; keep `Precision()` read |
+| 2026-06-25 | Merge `WeekStart` into `Precision`; drop `SpanUnit` interface; `Span(p Precision)` only |
+| 2026-06-25 | Duration clock constructors: `Min`, `Sec`, `Millis`, `Micros`, `Nanos` |
+| 2026-06-25 | `Duration(s)` panic constructor; parse `us`/`µs`/`μs`; marshal `String()` always `µs` |
