@@ -156,7 +156,10 @@ other type. v1 replaces that lattice with a small set of concrete types:
 | `Span` | struct | Half-open interval `[Start, End)` — the month, week, day, or arbitrary range |
 | `Duration` | struct | Calendar + clock offset to apply via `Add` / `Sub` |
 | `Precision` | enum (`uint8`) | Truncation, serialization, and `Span(p)` buckets. `MondayWeek` / `SundayWeek` are input-only week-boundary selectors; stored precision normalizes to `Week` |
-| `Unit` | enum | Named unit inside `Duration` (`Month`, `Week`, `Hour`, …) — distinct from `Precision` |
+
+There is no separate `Unit` or `SpanUnit` type — `WeekStart` and the old `SpanUnit`
+interface were merged into `Precision`. `Duration` uses struct fields plus constructor
+functions (`Months`, `Hours`, …), not a `Unit` enum.
 
 There is no `chron.Time` interface. Callers work with `Chron` and `Span` directly.
 
@@ -357,7 +360,7 @@ the interval is self-contained afterward.
 **Why one enum, no interface.** `SpanUnit` existed only so Go could accept two types in
 one method. A single `Precision` enum with week-boundary selectors at the end is simpler,
 matches the interfaceless v1 goal, and keeps `c.Span(chron.SundayWeek)` without a wrapper
-type. `Duration` keeps its own `Unit` enum — different concern (offsets, not buckets).
+type. **`Duration`** uses constructor functions (`Months`, `Hours`, …), not a separate enum.
 
 **Stored vs input precision.** Values stored on `Chron` (`parse`, `Truncate`, `Add`) are
 always `Year` … `Nanosecond`. `MondayWeek` / `SundayWeek` are input-only aliases that
@@ -555,7 +558,7 @@ Years(1).Months(3).Days(15).Hours(12)
 NewDuration(years, months, weeks, days int, clock time.Duration) Duration
 ```
 
-### Unit constructors
+### Duration constructors
 
 | Function | Applies as | Notes |
 |----------|------------|-------|
@@ -582,7 +585,7 @@ There is one apply path — no parallel `Add` overloads for strings.
 
 | Source | API | Example |
 |--------|-----|---------|
-| Go code | Unit constructors | `chron.Months(3).Days(5)` |
+| Go code | Constructor functions | `chron.Months(3).Days(5)` |
 | Inline string (panic on error) | `Duration(s)` | `chron.Duration("14d")` |
 | Boundaries / JSON (errors) | `ParseDuration` | `chron.ParseDuration("P1Y3M4DT12H")` |
 | JSON struct field | `Duration.UnmarshalJSON` | string or structured form |
