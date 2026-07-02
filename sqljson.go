@@ -12,7 +12,7 @@ func (c Chron) MarshalJSON() ([]byte, error) {
 	if c.IsZero() {
 		return []byte("null"), nil
 	}
-	return json.Marshal(formatChron(c))
+	return json.Marshal(c.String())
 }
 
 // UnmarshalJSON decodes a JSON string into c using registered parse layouts.
@@ -44,7 +44,7 @@ func (c Chron) Value() (driver.Value, error) {
 	if c.IsZero() {
 		return nil, nil
 	}
-	return formatChron(c), nil
+	return c.String(), nil
 }
 
 // Scan implements sql.Scanner for database/sql.

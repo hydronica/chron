@@ -68,6 +68,10 @@ func (d Duration) IsZero() bool {
 	return d.years == 0 && d.months == 0 && d.weeks == 0 && d.days == 0 && d.clock == 0
 }
 
+func (d Duration) clockOnly() bool {
+	return d.years == 0 && d.months == 0 && d.weeks == 0 && d.days == 0
+}
+
 // MustDuration parses s and panics on error. Prefer ParseDuration at I/O boundaries.
 // Spec name Duration(s) is spelled MustDuration here because Go disallows a func and
 // type with the same identifier in one package.
@@ -134,10 +138,6 @@ func ParseDuration(s string) (Duration, error) {
 		d = d.Neg()
 	}
 	return d, nil
-}
-
-func (d Duration) isClockOnly() bool {
-	return d.years == 0 && d.months == 0 && d.weeks == 0 && d.days == 0
 }
 
 // Precision
@@ -328,8 +328,8 @@ func unitLen(rest string, ascii string, runes ...string) int {
 	return 2
 }
 
-// FormatDuration returns the canonical lowercase duration string.
-func FormatDuration(d Duration) string {
+// String returns the canonical lowercase duration string.
+func (d Duration) String() string {
 	if d.IsZero() {
 		return "p0d"
 	}
@@ -407,14 +407,9 @@ func formatClock(clock time.Duration) string {
 	return strings.Join(parts, "")
 }
 
-// String returns the canonical duration string.
-func (d Duration) String() string {
-	return FormatDuration(d)
-}
-
 // MarshalJSON encodes d as a JSON string.
 func (d Duration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(FormatDuration(d))
+	return json.Marshal(d.String())
 }
 
 // UnmarshalJSON decodes a JSON string into d.

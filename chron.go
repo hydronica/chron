@@ -37,6 +37,39 @@ func Date(y int, m time.Month, d int) Chron {
 	}
 }
 
+// ParseFormats is the layout registry for Parse and UnmarshalJSON.
+// Register narrowest layouts before broader ones when ambiguity matters.
+var ParseFormats = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05",
+	"2006-01-02T15",
+	"2006-01-02",
+	"2006-01",
+	"2006",
+}
+
+// Parse tries registered layouts and sets precision from the matched layout.
+func Parse(s string) (Chron, error) {
+	for _, layout := range ParseFormats {
+		if c, err := ParseFrom(layout, s); err == nil {
+			return c, nil
+		}
+	}
+	return Chron{}, errParseChron
+}
+
+// ParseFrom parses s with an explicit layout and sets precision from the layout.
+func ParseFrom(layout, s string) (Chron, error) {
+	t, err := time.Parse(layout, s)
+	if err != nil {
+		return Chron{}, err
+	}
+	p := precisionFromLayout(layout)
+	t = Truncate(t.UTC(), p)
+	return Chron{Time: t, precision: p}, nil
+}
+
 // Precision returns the current precision metadata.
 func (c Chron) Precision() Precision {
 	return c.precision
@@ -61,7 +94,10 @@ func (c Chron) Truncate(p Precision) Chron {
 // Add applies d relative to c and updates precision per offset rules.
 func (c Chron) Add(d Duration) Chron {
 	t := c.Time.AddDate(d.years, d.months, d.weeks*7+d.days).Add(d.clock)
-	p := resultPrecisionAfterAdd(c.precision, d)
+	p := d.Precision()
+	if c.precision == Nanosecond && d.clockOnly() {
+		p = Nanosecond
+	}
 	return Chron{Time: t, precision: p}
 }
 
@@ -78,20 +114,6 @@ func (c Chron) Span(p Precision) Span {
 		Start: start,
 		End:   end,
 	}
-}
-
-func resultPrecisionAfterAdd(receiver Precision, d Duration) Precision {
-	if d.IsZero() {
-		return receiver
-	}
-	if receiver == Nanosecond {
-		return Nanosecond
-	}
-	finest := d.Precision()
-	if receiver == Nanosecond && d.isClockOnly() {
-		return Nanosecond
-	}
-	return finest
 }
 
 // Truncate returns the inclusive start of the unit containing t for precision p.
@@ -135,4 +157,16 @@ func mondayWeekStart(t time.Time) time.Time {
 func sundayWeekStart(t time.Time) time.Time {
 	t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 	return t.AddDate(0, 0, -int(t.Weekday()))
+}
+
+// String returns the precision-aware canonical string form of c.
+func (c Chron) String() string {
+	if c.IsZero() {
+		return ""
+	}
+	layout := layoutForPrecision(c.precision)
+	if layout == time.RFC3339 || layout == time.RFC3339Nano {
+		return c.Time.UTC().Format(layout)
+	}
+	return c.Time.UTC().Format(layout)
 }

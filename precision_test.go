@@ -31,9 +31,9 @@ func TestLess(t *testing.T) {
 			Input:    input{p1: MondayWeek, p2: Week},
 			Expected: true,
 		},
-		"sunday week less than monday week": {
+		"sunday week not less than monday week": {
 			Input:    input{p1: SundayWeek, p2: MondayWeek},
-			Expected: true,
+			Expected: false,
 		},
 		"day less than sunday week": {
 			Input:    input{p1: Day, p2: SundayWeek},
