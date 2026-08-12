@@ -1,4 +1,4 @@
-module chron
+module github.com/hydronica/chron
 
 go 1.22
 

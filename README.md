@@ -1,88 +1,126 @@
-## chron
+# chron
+
+[![GoDoc](http://img.shields.io/badge/go-documentation-blue.svg?style=flat-square)](https://godoc.org/github.com/hydronica/chron)
+[![CI](https://github.com/hydronica/chron/actions/workflows/ci.yml/badge.svg)](https://github.com/hydronica/chron/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/hydronica/chron/graph/badge.svg)](https://codecov.io/gh/hydronica/chron)
+
 it's time :]
 
-![](https://github.com/dustinevan/chron/blob/master/chron.png "chron")
+<img src="chron.png">
 
-Chron is a general purpose time library that embeds `time.Time` and can be used as a replacement. Chron uses `time.Time` for calculations, so you can trust it's accuracy.
+Chron is a UTC-first Go time library that wraps `time.Time` with precision metadata,
+calendar-aware durations, and half-open intervals. Use it where instants, buckets, and
+fuzzy calendar math need to stay distinct — without leaving the stdlib ecosystem.
 
-Why? There are many reasons, but the central one is that `time.Time` is often used as an interface. Holidays, credit card expiration dates, hourly reporting times, postgres timestamps; all these things have different time precisions, some are used as instants, while others are used as timespans. 
+## Background
 
-Chron aims to wrap `time.Time` and provide a more specific type system that is consistent with simplicity of beauty of `time.Time` and `time.Duration`. Chron's type system breaks up the idea of time into three interfaces: 
-```golang
-chron.Time // a specific nanosecond in time
-dura.Time  // an exact or fuzzy length of time
-chron.Span // a time interval with an exact start and end, like the year 2018
-```
-The implementations of these interfaces map to different time precisions. These types make it easier to reason about the times, durations, and spans represented in your program. They also provide ways to operate on times in a way that clearly shows precision. The type system is shown below:
+The original [dustinevan/chron](https://github.com/dustinevan/chron) tackled a familiar
+problem: `time.Time` is used for everything — event timestamps, billing months, hourly
+rollups, holiday dates — each with different precision and comparison semantics. The
+first design split time into three interfaces (`chron.Time`, `dura.Time`, `chron.Span`)
+with nine precision structs (`Year` … `Chron`) and cross-conversion methods.
 
-![](https://github.com/dustinevan/chron/blob/master/typesystem.png "type system")
+This keeps the motivation but simplifies the model: four concrete types you can grep
+and reason about — no interface lattice, no separate `dura` package.
 
-#### chron.Time implementations
+| Type | Role |
+|------|------|
+| `Chron` | An instant with optional `Precision` metadata |
+| `Duration` | Calendar + clock offsets (years, months, weeks, hours, …) |
+| `Span` | Half-open interval `[Start, End)` for buckets and containment |
+| `Precision` | Truncation, serialization, and span granularity |
 
-`chron.Year` ... `chron.Chron` are structs that embed `time.Time` and are truncated to a certain precision. You know that `chron.Hour` will always have 0 min, sec and nanoseconds. `chron.Chron` is the replacement for `time.Time` with nanosecond precision. These structs implement `chron.Time` which requires conversion functions to all other types.
-```golang
-now := chron.Now()          // type chron.Chron 2018-02-04 04:25:20.056473271 +0000 UTC
-this_micro := now.AsMicro() // type chron.Micro 2018-02-04 04:25:20.056473 +0000 UTC
-this_milli := now.AsMilli() // type chron.Milli 2018-02-04 04:25:20.056 +0000 UTC
-...
-this_month := now.AsMonth() // type chron.Month 2018-02-01 00:00:00 +0000 UTC
-this_year := now.AsYear()   // type chron.Year 2018-01-01 00:00:00 +0000 UTC
-time_time := now.AsTime()   // type time.Time 2018-02-04 04:25:20.056473271 +0000 UTC
-```
-`Increment` and `Decrement` functions are also required as part of the `chron.Time` interface. These functions handle any possible fuzzy or exact duration `(dura.Time)` and return a new `chron.Chron`
-```golang
-h := chron.Now().Increment(dura.NewDuration(1, 5, 32, time.Hour * 4 + time.Minute * 15 + time.Second * 30)).AsHour()
-// the hour 1 year, 5 months, 32 days, 4 hour, 15 minutes, and 30 seconds from now
-```
-While `Increment` and `Decrement` handle any time duration, simple operations are better done using the many convenience methods. 
-```golang
-now := chron.Now() // type chron.Chron 
-next_hour := chron.ThisHour().AddN(1) // type chron.Hour
-five_minutes_ago := now.AddMinutes(-5) // type chron.Chron
-previous_second := chron.ThisSecond().AddN(-1) // type chron.Second
-```
-JSON Unmarshaling methods support 25 different formats--more can be added by appending to `chron.ParseFormats`. `Scan` and `Value` methods are also implemented to allow DB support. 
+Design rationale lives in [`chron_v1.md`](chron_v1.md) and [`chron_v2.md`](chron_v2.md).
 
-Becuase `time.Time` is embedded, time package methods can be accessed directly. `Before`, `After`, and `UnmarshalJSON` are overwritten, but will provide the same functionality. `Before` and `After` now handle the overlapping nature of timespans, and `UnmarshalJSON` adds more formats besides `time.RFC3339`.     
+Chron still embeds `time.Time` for calculations, so accuracy matches the stdlib. All
+constructors normalize to UTC.
 
-#### Time Zones
-I have been burned by timezoned time data. I am of the opinion that all times belong in UTC until a human being wants to see them. I could be naive or wrong about this. Currently chron converts all times to UTC, so using the constructors will guarantee UTC internal times. If a chron user wants to create intances via `chron.Chron{...}`, it is their responsibility to ensure the underlying time is in UTC. 
+## Installation
 
-#### dura.Time implmentations
-`dura.Time` is an interface that represents the same thing as a `time.Duration` with one key difference. `dura.Time` implementations can handle fuzzy durations. The concepts Month and Year don't have fixed lengths until matched with a specific instant in time. 
-
-`time.Time` uses `Add` and `AddDate` to deal with these differences, but there isn't currently a way to hold an pass around a duration that has months and years in it. If time libraries start handling leap seconds in a similar way, week, day, hour, minute and second will also become fuzzy. 
-
-There are currently 2 implementations of `dura.Time`: `dura.Duration` as struct that holds years, months, days, and a time.Duration, and `dura.Unit` an int enum that defines standard units of time. 
-```golang
-d := dura.NewDuration(1, 3, 15, time.Hour*12)
-d = d.Mult(3) // 3 years, 9 months, 45 days, 36 hours
-now := chron.Now() // 2018-02-04 21:09:50.096961028 +0000 UTC
-future := now.Increment(d) //2021-12-21 09:09:50.096961028 +0000 UTC
-```
-Convenience methods have overcome the original uses for `dura.Unit` constants, there are left here for possible use in switch statements and as the hard coded durations in chron.Span implementations. 
-```golang
-today := chron.today()
-// before 
-noon := today.Increment(dura.Hour.Mult(12)).AsHour()
-// new
-noon := today.AddHours(12)
-```
-#### chron.Span implementations
-`chron.Span` is just a time combined with a duration. Each of the `chron.Time` implementations also implement `chron.Span`. This interface allows the compairson of timespans rather than just time instants. 
-```golang
-tomorrow := chron.Today().AddDays(1)
-noon_tomorrow := tomorrow.AddHours(12)
-if tomorrow.Contains(noon_tomorrow) {
-    fmt.Println(:])
-}
-if chron.Today().Before(tomorrow) {
-    fmt.Println(:])
-}
+```bash
+go get github.com/hydronica/chron
 ```
 
-#### Future Plans
-I actually set out to write a scheduler, then I decided I needed a library that could output a stream of times base on input arguments. Then I decided to write some time conveniece stuff to make all the odd time precision and fuzzy duration issues easier to deal with. Chron will eventually become the second thing. I plan to add time series, time sequence and relative time functionality in the near future. What exists now though is solid, all changes to current code will preserve backward compatibility. 
+Requires **Go 1.22+**. 
 
-#### Issues
-Please make issues if you have things you want to discuss or that you think need fixing. I'm all ears.  
+## Quick start
+
+### Chron — instants, truncate, add
+
+```go
+import "github.com/hydronica/chron"
+
+now := chron.Now()
+feb := chron.Date(2026, 2, 1)
+startOfMonth := now.Truncate(chron.Month)
+next := now.Add(chron.Months(1).Days(3).Hours(4))
+parsed, _ := chron.Parse("2026-02")
+```
+
+`Truncate(p)` returns the inclusive start of the unit containing the instant and sets
+precision on the result. `Add` and `Sub` apply a `Duration` using `AddDate` for calendar
+fields and `Add` for clock fields.
+
+### Duration — calendar math and ISO 8601
+
+```go
+d := chron.Years(1).Months(3).Hours(12)
+d, _ = chron.ParseDuration("p1y3m12h")
+d.String() // "p1y3m12h"
+```
+
+`Duration` unifies what stdlib splits across `AddDate` and `Add`. Parse accepts ISO 8601
+(`PnYnMnDTnHnMnS`) plus chron extensions (bare `14d`, `ms`/`µs`/`ns`). Zero durations
+marshal as JSON `null` and stringify to `""`.
+
+### Span — intervals for SQL, billing, and overlap
+
+```go
+window := expiry.Span(expiry.Precision()) // [Start, End)
+db.Query(`WHERE at >= $1 AND at < $2`, window.Start.AsTime(), window.End.AsTime())
+
+if window.Contains(event) { /* membership, not point ordering */ }
+if window.Overlaps(other) { /* scheduling conflicts */ }
+```
+
+`Span` is half-open: `End` is exclusive. Build arbitrary ranges with `NewSpan` /
+`MustSpan`, or derive a calendar bucket from any instant via `c.Span(p)`.
+
+### Precision and weeks
+
+```go
+chron.DefaultWeekStart = chron.MondayWeek // ISO week (default)
+
+monday := now.Truncate(chron.MondayWeek)
+sunday := now.Truncate(chron.SundayWeek)
+week := now.Truncate(chron.Week) // uses DefaultWeekStart
+```
+
+`MondayWeek` and `SundayWeek` select explicit week boundaries; stored precision
+normalizes to `Week`.
+
+### Interop
+
+- **`AsTime()`** — pass a `Chron` to any API that expects `time.Time`
+- **Embedded `time.Time`** — `Format`, `Unix`, `Year`, `Month`, and other stdlib methods work directly; use `Span.Contains` for interval membership instead of overloading `Before`/`After`
+- **`Parse` / `ParseFormats`** — registered layouts set precision from the match
+- **JSON** — `MarshalJSON` encodes a precision-aware string, or `null` when zero
+- **SQL** — `Scan` and `Value` for `database/sql` round-trips
+
+## Time zones
+
+All times belong in UTC until a human needs to see them. Constructors (`Now`, `Date`,
+`Parse`, `FromTime`) guarantee UTC internal storage. Use `InLocation` for display only.
+
+## Development
+
+```bash
+go test ./...
+```
+
+CI runs tests with the race detector on every even go version starting with  Go 1.22 and uploads coverage
+to [Codecov](https://codecov.io/gh/hydronica/chron) using the latest stable Go release.
+
+## Issues
+
+Open an issue on GitHub if you have questions, ideas, or bugs to report.
