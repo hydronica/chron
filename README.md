@@ -9,7 +9,7 @@ it's time :]
 <img src="chron.png">
 
 Chron is a UTC-first Go time library that wraps `time.Time` with precision metadata,
-calendar-aware durations, and half-open intervals. Use it where instants, buckets, and
+calendar-aware durations, and closed intervals. Use it where instants, buckets, and
 fuzzy calendar math need to stay distinct — without leaving the stdlib ecosystem.
 
 ## Background
@@ -27,10 +27,11 @@ and reason about — no interface lattice, no separate `dura` package.
 |------|------|
 | `Chron` | An instant with optional `Precision` metadata |
 | `Duration` | Calendar + clock offsets (years, months, weeks, hours, …) |
-| `Span` | Half-open interval `[Start, End)` for buckets and containment |
+| `Span` | Closed interval `[Start, End]` for buckets and containment |
 | `Precision` | Truncation, serialization, and span granularity |
 
-Design rationale lives in [`chron_v1.md`](chron_v1.md) and [`chron_v2.md`](chron_v2.md).
+Design rationale lives in [`chron_v1.md`](chron_v1.md) and [`chron_v2.md`](chron_v2.md)
+(v2 is authoritative where they disagree).
 
 Chron still embeds `time.Time` for calculations, so accuracy matches the stdlib. All
 constructors normalize to UTC.
@@ -41,11 +42,11 @@ constructors normalize to UTC.
 go get github.com/hydronica/chron
 ```
 
-Requires **Go 1.22+**. 
+Requires **Go 1.23+**.
 
 ## Quick start
 
-### Chron — instants, truncate, add
+### Chron — instants, truncate, end of unit, add
 
 ```go
 import "github.com/hydronica/chron"
@@ -53,13 +54,14 @@ import "github.com/hydronica/chron"
 now := chron.Now()
 feb := chron.Date(2026, 2, 1)
 startOfMonth := now.Truncate(chron.Month)
+endOfMonth := now.EndOf(chron.Month)
 next := now.Add(chron.Months(1).Days(3).Hours(4))
 parsed, _ := chron.Parse("2026-02")
 ```
 
-`Truncate(p)` returns the inclusive start of the unit containing the instant and sets
-precision on the result. `Add` and `Sub` apply a `Duration` using `AddDate` for calendar
-fields and `Add` for clock fields.
+`Truncate(p)` returns the inclusive start of the unit; `EndOf(p)` returns the last
+nanosecond of that unit. `Add` and `Sub` apply a `Duration` using `AddDate` for
+calendar fields and `Add` for clock fields.
 
 ### Duration — calendar math and ISO 8601
 
@@ -70,21 +72,27 @@ d.String() // "p1y3m12h"
 ```
 
 `Duration` unifies what stdlib splits across `AddDate` and `Add`. Parse accepts ISO 8601
-(`PnYnMnDTnHnMnS`) plus chron extensions (bare `14d`, `ms`/`µs`/`ns`). Zero durations
-marshal as JSON `null` and stringify to `""`.
+(`PnYnMnDTnHnMnS`) plus chron extensions (bare `14d`, `ms`/`µs`/`ns`, mixed `P1Y1W`,
+fractional `P1.5Y` → 18 months). Zero durations marshal as JSON `null` and stringify
+to `""`. Canonical marshal decomposes totals (`Days(14)` → `"p2w"`).
 
-### Span — intervals for SQL, billing, and overlap
+### Span — closed intervals for SQL, billing, and iteration
 
 ```go
-window := expiry.Span(expiry.Precision()) // [Start, End)
-db.Query(`WHERE at >= $1 AND at < $2`, window.Start.AsTime(), window.End.AsTime())
+window := expiry.Span(expiry.Precision()) // [Truncate, EndOf] inclusive
+db.Query(`WHERE at >= $1 AND at <= $2`, window.Start.AsTime(), window.End.AsTime())
 
 if window.Contains(event) { /* membership, not point ordering */ }
 if window.Overlaps(other) { /* scheduling conflicts */ }
+
+for day := range chron.NewSpan(start, end).Each(chron.Days(1)) {
+    // inclusive walk; reverse spans walk Start → End
+}
 ```
 
-`Span` is half-open: `End` is exclusive. Build arbitrary ranges with `NewSpan` /
-`MustSpan`, or derive a calendar bucket from any instant via `c.Span(p)`.
+`Span` is closed: both `Start` and `End` are included. Point (`Start == End`) and
+reverse (`Start` after `End`) spans are valid. Build ranges with `NewSpan` or
+`SpanBetween` (ordered), or derive a calendar bucket via `c.Span(p)`.
 
 ### Precision and weeks
 
@@ -96,8 +104,8 @@ sunday := now.Truncate(chron.SundayWeek)
 week := now.Truncate(chron.Week) // uses DefaultWeekStart
 ```
 
-`MondayWeek` and `SundayWeek` select explicit week boundaries; stored precision
-normalizes to `Week`.
+`MondayWeek` and `SundayWeek` select explicit week boundaries; stored precision on
+week selectors follows `Truncate`/`EndOf` input.
 
 ### Interop
 
@@ -118,7 +126,7 @@ All times belong in UTC until a human needs to see them. Constructors (`Now`, `D
 go test ./...
 ```
 
-CI runs tests with the race detector on every even go version starting with  Go 1.22 and uploads coverage
+CI runs tests with the race detector on Go 1.23, 1.24, and 1.26 and uploads coverage
 to [Codecov](https://codecov.io/gh/hydronica/chron) using the latest stable Go release.
 
 ## Issues

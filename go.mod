@@ -1,6 +1,6 @@
 module github.com/hydronica/chron
 
-go 1.22
+go 1.23
 
 require github.com/hydronica/trial v0.8.0
 

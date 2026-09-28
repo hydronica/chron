@@ -6,7 +6,6 @@ import (
 )
 
 var (
-	errInvalidSpan     = errors.New("chron: invalid span: start must be before end")
 	errParseChron      = errors.New("chron: unable to parse time")
 	errParseDuration   = errors.New("chron: unable to parse duration")
 	errInvalidDuration = errors.New("chron: invalid duration")
@@ -91,9 +90,15 @@ func (c Chron) Truncate(p Precision) Chron {
 	return Chron{Time: Truncate(c.Time, p), precision: p}
 }
 
+// EndOf returns the inclusive end of the unit containing c for precision p.
+// The result is the last nanosecond of that unit (UTC).
+func (c Chron) EndOf(p Precision) Chron {
+	return Chron{Time: endOf(c.Time, p), precision: p}
+}
+
 // Add applies d relative to c and updates precision per offset rules.
 func (c Chron) Add(d Duration) Chron {
-	t := c.Time.AddDate(d.years, d.months, d.weeks*7+d.days).Add(d.clock)
+	t := c.Time.AddDate(0, int(d.months), int(d.days)).Add(d.clock)
 	p := d.Precision()
 	if c.precision == Nanosecond && d.clockOnly() {
 		p = Nanosecond
@@ -106,14 +111,9 @@ func (c Chron) Sub(d Duration) Chron {
 	return c.Add(d.Neg())
 }
 
-// Span returns the half-open interval [start, end) containing c for precision p.
+// Span returns the closed interval [start, end] containing c for precision p.
 func (c Chron) Span(p Precision) Span {
-	start := c.Truncate(p)
-	end := start.Add(p.Duration())
-	return Span{
-		Start: start,
-		End:   end,
-	}
+	return NewSpan(c.Truncate(p), c.EndOf(p))
 }
 
 // Truncate returns the inclusive start of the unit containing t for precision p.
@@ -145,6 +145,35 @@ func Truncate(t time.Time, p Precision) time.Time {
 		return t
 	default:
 		return t
+	}
+}
+
+// endOf returns the last nanosecond of the unit containing t for precision p.
+func endOf(t time.Time, p Precision) time.Time {
+	start := Truncate(t, p)
+	switch weekBoundary(p) {
+	case Year:
+		return time.Date(start.Year(), time.December, 31, 23, 59, 59, 999999999, time.UTC)
+	case Month:
+		return start.AddDate(0, 1, 0).Add(-time.Nanosecond)
+	case MondayWeek, SundayWeek:
+		return start.AddDate(0, 0, 7).Add(-time.Nanosecond)
+	case Day:
+		return time.Date(start.Year(), start.Month(), start.Day(), 23, 59, 59, 999999999, time.UTC)
+	case Hour:
+		return start.Add(time.Hour).Add(-time.Nanosecond)
+	case Minute:
+		return start.Add(time.Minute).Add(-time.Nanosecond)
+	case Second:
+		return start.Add(time.Second).Add(-time.Nanosecond)
+	case Millisecond:
+		return start.Add(time.Millisecond).Add(-time.Nanosecond)
+	case MicroSecond:
+		return start.Add(time.Microsecond).Add(-time.Nanosecond)
+	case Nanosecond:
+		return start
+	default:
+		return start
 	}
 }
 

@@ -7,11 +7,6 @@ import (
 	"github.com/hydronica/trial"
 )
 
-func durationEqual(a, b Duration) bool {
-	anchor := Date(2020, 6, 15)
-	return anchor.Add(a).Equal(anchor.Add(b).Time)
-}
-
 func TestParseDuration(t *testing.T) {
 	cases := trial.Cases[string, Duration]{
 		"ISO 14 days": {
@@ -58,19 +53,52 @@ func TestParseDuration(t *testing.T) {
 			Input:    "-P1D",
 			Expected: Days(-1),
 		},
-		"fractional year": {
-			Input:       "P1.5Y",
-			ExpectedErr: errInvalidDuration,
+		"fractional year as months": {
+			Input:    "P1.5Y",
+			Expected: Months(18),
 		},
 		"week combined with year": {
-			Input:       "P1Y1W",
+			Input:    "P1Y1W",
+			Expected: Years(1).Weeks(1),
+		},
+		"week combined with days": {
+			Input:    "P2W1D",
+			Expected: Weeks(2).Days(1),
+		},
+		"fractional month rejected": {
+			Input:       "P1.5M",
 			ExpectedErr: errInvalidDuration,
 		},
 	}
 	trial.New(ParseDuration, cases).SubTest(t)
 }
 
-func TestDurationJSON(t *testing.T) {
+func TestDuration_String(t *testing.T) {
+	fn := func(d Duration) (string, error) {
+		return d.String(), nil
+	}
+	cases := trial.Cases[Duration, string]{
+		"zero": {
+			Input:    Duration{},
+			Expected: "",
+		},
+		"two weeks": {
+			Input:    Weeks(2),
+			Expected: "p2w",
+		},
+		"fourteen days": {
+			Input:    Days(14),
+			Expected: "p2w",
+		},
+		"year and week": {
+			Input:    Years(1).Weeks(1),
+			Expected: "p1y1w",
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
+func TestDuration_MarshalJSON(t *testing.T) {
 	type cfg struct {
 		Length Duration `json:"length"`
 	}
@@ -83,26 +111,78 @@ func TestDurationJSON(t *testing.T) {
 	cases := trial.Cases[Duration, string]{
 		"zero duration": {
 			Input:    Duration{},
-			Expected: `{"length":"p0d"}`,
+			Expected: `{"length":null}`,
 		},
 		"14 days": {
 			Input:    Days(14),
-			Expected: `{"length":"p14d"}`,
+			Expected: `{"length":"p2w"}`,
 		},
 		"250 microseconds": {
 			Input:    Micros(250),
 			Expected: `{"length":"pt250µs"}`,
 		},
+		"years decompose": {
+			Input:    Years(1),
+			Expected: `{"length":"p1y"}`,
+		},
+		"twelve months decompose to year": {
+			Input:    Months(12),
+			Expected: `{"length":"p1y"}`,
+		},
 	}
 	trial.New(fn, cases).SubTest(t)
 }
 
-func TestDurationNegMul(t *testing.T) {
-	d := Months(2).Mul(3)
-	if d.String() != "p6m" {
-		t.Fatalf("Months(2).Mul(3).String() = %q, want p6m", d.String())
+func TestDuration_UnmarshalJSON(t *testing.T) {
+	fn := func(raw string) (Duration, error) {
+		var d Duration
+		err := json.Unmarshal([]byte(raw), &d)
+		return d, err
 	}
-	if !durationEqual(d.Neg(), Months(-6)) {
-		t.Fatal("Months(2).Mul(3).Neg() mismatch, want Months(-6)")
+
+	cases := trial.Cases[string, Duration]{
+		"null": {
+			Input:    `null`,
+			Expected: Duration{},
+		},
+		"empty string": {
+			Input:    `""`,
+			Expected: Duration{},
+		},
+		"14 days": {
+			Input:    `"14d"`,
+			Expected: Days(14),
+		},
 	}
+	trial.New(fn, cases).SubTest(t)
+}
+
+func TestDuration_Mul(t *testing.T) {
+	type input struct {
+		d Duration
+		n int
+	}
+	fn := func(in input) (string, error) {
+		return in.d.Mul(in.n).String(), nil
+	}
+	cases := trial.Cases[input, string]{
+		"months times three": {
+			Input:    input{d: Months(2), n: 3},
+			Expected: "p6m",
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
+func TestDuration_Neg(t *testing.T) {
+	fn := func(d Duration) (string, error) {
+		return d.Neg().String(), nil
+	}
+	cases := trial.Cases[Duration, string]{
+		"negates months": {
+			Input:    Months(6),
+			Expected: "-p6m",
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
 }

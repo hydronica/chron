@@ -186,7 +186,7 @@ func TestSub(t *testing.T) {
 	}
 }
 
-func TestChronMarshalJSON(t *testing.T) {
+func TestChron_MarshalJSON(t *testing.T) {
 	fn := func(c Chron) (string, error) {
 		data, err := json.Marshal(c)
 		return string(data), err
@@ -224,6 +224,102 @@ func TestChronMarshalJSON(t *testing.T) {
 		"nanosecond": {
 			Input:    testAnchor,
 			Expected: `"2026-02-04T15:30:45.123456789Z"`,
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
+func TestChron_Span(t *testing.T) {
+	type input struct {
+		anchor    Chron
+		precision Precision
+	}
+	type bounds struct {
+		start     string
+		end       string
+		precision Precision
+	}
+
+	fn := func(in input) (bounds, error) {
+		s := in.anchor.Span(in.precision)
+		return bounds{
+			start:     s.Start.String(),
+			end:       s.End.AsTime().UTC().Format(time.RFC3339Nano),
+			precision: s.Start.Precision(),
+		}, nil
+	}
+
+	cases := trial.Cases[input, bounds]{
+		"february month": {
+			Input: input{anchor: Date(2026, 2, 15), precision: Month},
+			Expected: bounds{
+				start:     "2026-02",
+				end:       "2026-02-28T23:59:59.999999999Z",
+				precision: Month,
+			},
+		},
+		"monday week": {
+			Input: input{anchor: Date(2026, 2, 4), precision: MondayWeek},
+			Expected: bounds{
+				start:     "2026-02-02T00:00:00Z",
+				end:       "2026-02-08T23:59:59.999999999Z",
+				precision: MondayWeek,
+			},
+		},
+		"sunday week": {
+			Input: input{anchor: Date(2026, 2, 4), precision: SundayWeek},
+			Expected: bounds{
+				start:     "2026-02-01T00:00:00Z",
+				end:       "2026-02-07T23:59:59.999999999Z",
+				precision: SundayWeek,
+			},
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
+func TestChron_EndOf(t *testing.T) {
+	type input struct {
+		anchor Chron
+		p      Precision
+	}
+
+	fn := func(in input) (string, error) {
+		return in.anchor.EndOf(in.p).AsTime().UTC().Format(time.RFC3339Nano), nil
+	}
+
+	cases := trial.Cases[input, string]{
+		"day": {
+			Input:    input{anchor: testAnchor, p: Day},
+			Expected: "2026-02-04T23:59:59.999999999Z",
+		},
+		"week default monday": {
+			Input:    input{anchor: testAnchor, p: Week},
+			Expected: "2026-02-08T23:59:59.999999999Z",
+		},
+		"monday week": {
+			Input:    input{anchor: testAnchor, p: MondayWeek},
+			Expected: "2026-02-08T23:59:59.999999999Z",
+		},
+		"sunday week": {
+			Input:    input{anchor: testAnchor, p: SundayWeek},
+			Expected: "2026-02-07T23:59:59.999999999Z",
+		},
+		"month february non-leap": {
+			Input:    input{anchor: Date(2026, 2, 15), p: Month},
+			Expected: "2026-02-28T23:59:59.999999999Z",
+		},
+		"month february leap": {
+			Input:    input{anchor: Date(2024, 2, 15), p: Month},
+			Expected: "2024-02-29T23:59:59.999999999Z",
+		},
+		"month 31-day": {
+			Input:    input{anchor: Date(2026, 1, 10), p: Month},
+			Expected: "2026-01-31T23:59:59.999999999Z",
+		},
+		"year": {
+			Input:    input{anchor: testAnchor, p: Year},
+			Expected: "2026-12-31T23:59:59.999999999Z",
 		},
 	}
 	trial.New(fn, cases).SubTest(t)

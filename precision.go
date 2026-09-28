@@ -44,6 +44,8 @@ func (p Precision) Duration() Duration {
 		return Weeks(1)
 	case Day:
 		return Days(1)
+	case Hour:
+		return Hours(1)
 	case Minute:
 		return Minutes(1)
 	case Second:
@@ -52,7 +54,7 @@ func (p Precision) Duration() Duration {
 		return Micros(1)
 	case Millisecond:
 		return Millis(1)
-	default: // case NanoSecond
+	default: // case Nanosecond
 		return Nanos(1)
 	}
 }

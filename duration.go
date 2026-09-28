@@ -10,17 +10,18 @@ import (
 )
 
 // Duration is a sum of calendar and clock offsets.
-// Calendar fields are applied via AddDate (order: years, months, days).
-// Clock is applied last via Add (fixed nanoseconds).
+// Calendar fields are stored collapsed (months, days) and applied via AddDate;
+// clock is applied last via Add (fixed nanoseconds).
 type Duration struct {
-	years, months, weeks, days int
-	clock                      time.Duration
+	months int32 // years*12 + months
+	days   int32 // weeks*7 + days
+	clock  time.Duration
 }
 
-func Years(n int) Duration           { return Duration{years: n} }
-func Months(n int) Duration          { return Duration{months: n} }
-func Weeks(n int) Duration           { return Duration{weeks: n} }
-func Days(n int) Duration            { return Duration{days: n} }
+func Years(n int) Duration           { return Duration{months: int32(n) * 12} }
+func Months(n int) Duration          { return Duration{months: int32(n)} }
+func Weeks(n int) Duration           { return Duration{days: int32(n) * 7} }
+func Days(n int) Duration            { return Duration{days: int32(n)} }
 func Hours(n int) Duration           { return Duration{clock: time.Duration(n) * time.Hour} }
 func Minutes(n int) Duration         { return Duration{clock: time.Duration(n) * time.Minute} }
 func Seconds(n int) Duration         { return Duration{clock: time.Duration(n) * time.Second} }
@@ -29,10 +30,10 @@ func Micros(n int) Duration          { return Duration{clock: time.Duration(n) *
 func Nanos(n int) Duration           { return Duration{clock: time.Duration(n) * time.Nanosecond} }
 func Clock(d time.Duration) Duration { return Duration{clock: d} }
 
-func (d Duration) Years(n int) Duration           { d.years += n; return d }
-func (d Duration) Months(n int) Duration          { d.months += n; return d }
-func (d Duration) Weeks(n int) Duration           { d.weeks += n; return d }
-func (d Duration) Days(n int) Duration            { d.days += n; return d }
+func (d Duration) Years(n int) Duration           { d.months += int32(n) * 12; return d }
+func (d Duration) Months(n int) Duration          { d.months += int32(n); return d }
+func (d Duration) Weeks(n int) Duration           { d.days += int32(n) * 7; return d }
+func (d Duration) Days(n int) Duration            { d.days += int32(n); return d }
 func (d Duration) Hours(n int) Duration           { d.clock += time.Duration(n) * time.Hour; return d }
 func (d Duration) Min(n int) Duration             { d.clock += time.Duration(n) * time.Minute; return d }
 func (d Duration) Sec(n int) Duration             { d.clock += time.Duration(n) * time.Second; return d }
@@ -44,9 +45,7 @@ func (d Duration) Clock(c time.Duration) Duration { d.clock += c; return d }
 // Neg flips the sign of all components.
 func (d Duration) Neg() Duration {
 	return Duration{
-		years:  -d.years,
 		months: -d.months,
-		weeks:  -d.weeks,
 		days:   -d.days,
 		clock:  -d.clock,
 	}
@@ -55,21 +54,19 @@ func (d Duration) Neg() Duration {
 // Mul scales all components by n.
 func (d Duration) Mul(n int) Duration {
 	return Duration{
-		years:  d.years * n,
-		months: d.months * n,
-		weeks:  d.weeks * n,
-		days:   d.days * n,
+		months: d.months * int32(n),
+		days:   d.days * int32(n),
 		clock:  d.clock * time.Duration(n),
 	}
 }
 
 // IsZero reports whether d has no offset.
 func (d Duration) IsZero() bool {
-	return d.years == 0 && d.months == 0 && d.weeks == 0 && d.days == 0 && d.clock == 0
+	return d.months == 0 && d.days == 0 && d.clock == 0
 }
 
 func (d Duration) clockOnly() bool {
-	return d.years == 0 && d.months == 0 && d.weeks == 0 && d.days == 0
+	return d.months == 0 && d.days == 0
 }
 
 // MustDuration parses s and panics on error. Prefer ParseDuration at I/O boundaries.
@@ -140,7 +137,7 @@ func ParseDuration(s string) (Duration, error) {
 	return d, nil
 }
 
-// Precision
+// Precision returns the finest unit after canonical decomposition.
 func (d Duration) Precision() Precision {
 	if d.clock != 0 {
 		abs := d.clock
@@ -162,21 +159,31 @@ func (d Duration) Precision() Precision {
 			return Nanosecond
 		}
 	}
-	if d.days != 0 {
-		return Day
+
+	months := d.months
+	days := d.days
+	if months < 0 {
+		months = -months
 	}
-	if d.weeks != 0 {
-		return Week
-	}
-	if d.months != 0 {
-		return Month
-	}
-	if d.years != 0 {
-		return Year
+	if days < 0 {
+		days = -days
 	}
 
-	// duration is zero
-	return Nanosecond
+	y, m := months/12, months%12
+	w, dayRem := days/7, days%7
+
+	switch {
+	case dayRem != 0:
+		return Day
+	case w != 0:
+		return Week
+	case m != 0:
+		return Month
+	case y != 0:
+		return Year
+	default:
+		return Nanosecond
+	}
 }
 
 func isBareClockUnit(s string) bool {
@@ -193,41 +200,60 @@ func parseDatePart(part string, d *Duration) error {
 	if part == "" {
 		return nil
 	}
-	hasW := false
-	hasYMD := false
 	for len(part) > 0 {
 		numStr, rest, ok := readNumber(part)
 		if !ok || len(rest) == 0 {
 			return errParseDuration
 		}
-		if strings.ContainsAny(numStr, ".,") {
-			return errInvalidDuration
-		}
-		n, err := strconv.Atoi(numStr)
-		if err != nil {
-			return errParseDuration
-		}
-		unit := unicode.ToLower([]rune(rest)[0])
+		unit := unicode.ToLower(rune(rest[0]))
 		part = rest[1:]
+
 		switch unit {
 		case 'y':
-			hasYMD = true
-			d.years = n
+			if strings.ContainsAny(numStr, ".,") {
+				f, err := strconv.ParseFloat(strings.ReplaceAll(numStr, ",", "."), 64)
+				if err != nil {
+					return errParseDuration
+				}
+				// Fractional years become whole months (P1.5Y → 18).
+				d.months += int32(f * 12)
+			} else {
+				n, err := strconv.Atoi(numStr)
+				if err != nil {
+					return errParseDuration
+				}
+				d.months += int32(n) * 12
+			}
 		case 'm':
-			hasYMD = true
-			d.months = n
+			if strings.ContainsAny(numStr, ".,") {
+				return errInvalidDuration
+			}
+			n, err := strconv.Atoi(numStr)
+			if err != nil {
+				return errParseDuration
+			}
+			d.months += int32(n)
 		case 'w':
-			hasW = true
-			d.weeks = n
+			if strings.ContainsAny(numStr, ".,") {
+				return errInvalidDuration
+			}
+			n, err := strconv.Atoi(numStr)
+			if err != nil {
+				return errParseDuration
+			}
+			d.days += int32(n) * 7
 		case 'd':
-			hasYMD = true
-			d.days = n
+			if strings.ContainsAny(numStr, ".,") {
+				return errInvalidDuration
+			}
+			n, err := strconv.Atoi(numStr)
+			if err != nil {
+				return errParseDuration
+			}
+			d.days += int32(n)
 		default:
 			return errParseDuration
 		}
-	}
-	if hasW && hasYMD {
-		return errInvalidDuration
 	}
 	return nil
 }
@@ -329,12 +355,13 @@ func unitLen(rest string, ascii string, runes ...string) int {
 }
 
 // String returns the canonical lowercase duration string.
+// Zero returns "". Months decompose to y+m; days to w+d.
 func (d Duration) String() string {
 	if d.IsZero() {
-		return "p0d"
+		return ""
 	}
 
-	neg := d.years < 0 || d.months < 0 || d.weeks < 0 || d.days < 0 || d.clock < 0
+	neg := d.months < 0 || d.days < 0 || d.clock < 0
 	if neg {
 		d = d.Neg()
 	}
@@ -345,17 +372,22 @@ func (d Duration) String() string {
 	}
 	b.WriteByte('p')
 
-	if d.years != 0 {
-		fmt.Fprintf(&b, "%dy", d.years)
+	y := d.months / 12
+	m := d.months % 12
+	w := d.days / 7
+	day := d.days % 7
+
+	if y != 0 {
+		fmt.Fprintf(&b, "%dy", y)
 	}
-	if d.months != 0 {
-		fmt.Fprintf(&b, "%dm", d.months)
+	if m != 0 {
+		fmt.Fprintf(&b, "%dm", m)
 	}
-	if d.weeks != 0 {
-		fmt.Fprintf(&b, "%dw", d.weeks)
+	if w != 0 {
+		fmt.Fprintf(&b, "%dw", w)
 	}
-	if d.days != 0 {
-		fmt.Fprintf(&b, "%dd", d.days)
+	if day != 0 {
+		fmt.Fprintf(&b, "%dd", day)
 	}
 
 	if d.clock != 0 {
@@ -407,16 +439,27 @@ func formatClock(clock time.Duration) string {
 	return strings.Join(parts, "")
 }
 
-// MarshalJSON encodes d as a JSON string.
+// MarshalJSON encodes d as a JSON string, or null when zero.
 func (d Duration) MarshalJSON() ([]byte, error) {
+	if d.IsZero() {
+		return []byte("null"), nil
+	}
 	return json.Marshal(d.String())
 }
 
-// UnmarshalJSON decodes a JSON string into d.
+// UnmarshalJSON decodes a JSON string or null into d.
 func (d *Duration) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*d = Duration{}
+		return nil
+	}
 	var s string
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
+	}
+	if s == "" {
+		*d = Duration{}
+		return nil
 	}
 	parsed, err := ParseDuration(s)
 	if err != nil {
