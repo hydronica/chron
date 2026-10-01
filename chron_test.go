@@ -11,7 +11,7 @@ import (
 // testAnchor is the shared instant for Truncate and Add table tests.
 var testAnchor = FromTime(time.Date(2026, 2, 4, 15, 30, 45, 123456789, time.UTC))
 
-func TestTruncate(t *testing.T) {
+func TestChron_Truncate(t *testing.T) {
 	fn := func(p Precision) (string, error) {
 		return testAnchor.Truncate(p).String(), nil
 	}
@@ -58,7 +58,7 @@ func TestTruncate(t *testing.T) {
 			Expected: "2026-02-04T15:30:45.123Z",
 		},
 		"microsecond": {
-			Input:    MicroSecond,
+			Input:    Microsecond,
 			Expected: "2026-02-04T15:30:45.123456Z",
 		},
 		"nanosecond": {
@@ -69,7 +69,7 @@ func TestTruncate(t *testing.T) {
 	trial.New(fn, cases).SubTest(t)
 }
 
-func TestAdd(t *testing.T) {
+func TestChron_Add(t *testing.T) {
 	day := testAnchor.Truncate(Day)
 	month := testAnchor.Truncate(Month)
 
@@ -178,7 +178,7 @@ func TestParse(t *testing.T) {
 	trial.New(fn, cases).SubTest(t)
 }
 
-func TestSub(t *testing.T) {
+func TestChron_Sub(t *testing.T) {
 	c := Date(2026, 3, 1).Sub(Months(1))
 	want := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	if !c.Equal(want) {

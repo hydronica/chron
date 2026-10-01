@@ -35,8 +35,8 @@ func (d Duration) Months(n int) Duration          { d.months += int32(n); return
 func (d Duration) Weeks(n int) Duration           { d.days += int32(n) * 7; return d }
 func (d Duration) Days(n int) Duration            { d.days += int32(n); return d }
 func (d Duration) Hours(n int) Duration           { d.clock += time.Duration(n) * time.Hour; return d }
-func (d Duration) Min(n int) Duration             { d.clock += time.Duration(n) * time.Minute; return d }
-func (d Duration) Sec(n int) Duration             { d.clock += time.Duration(n) * time.Second; return d }
+func (d Duration) Minutes(n int) Duration         { d.clock += time.Duration(n) * time.Minute; return d }
+func (d Duration) Seconds(n int) Duration         { d.clock += time.Duration(n) * time.Second; return d }
 func (d Duration) Millis(n int) Duration          { d.clock += time.Duration(n) * time.Millisecond; return d }
 func (d Duration) Micros(n int) Duration          { d.clock += time.Duration(n) * time.Microsecond; return d }
 func (d Duration) Nanos(n int) Duration           { d.clock += time.Duration(n) * time.Nanosecond; return d }
@@ -154,7 +154,7 @@ func (d Duration) Precision() Precision {
 		case abs%time.Millisecond == 0:
 			return Millisecond
 		case abs%time.Microsecond == 0:
-			return MicroSecond
+			return Microsecond
 		default:
 			return Nanosecond
 		}

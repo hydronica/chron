@@ -98,6 +98,50 @@ func TestSpan_Overlaps(t *testing.T) {
 	trial.New(fn, cases).SubTest(t)
 }
 
+func TestSpan_ContainsSpan(t *testing.T) {
+	type input struct {
+		a Span
+		b Span
+	}
+
+	fn := func(in input) (bool, error) {
+		return in.a.ContainsSpan(in.b), nil
+	}
+
+	feb := Date(2026, 2, 15).Span(Month)
+	cases := trial.Cases[input, bool]{
+		"inner day inside month": {
+			Input: input{
+				a: feb,
+				b: NewSpan(Date(2026, 2, 10), Date(2026, 2, 12)),
+			},
+			Expected: true,
+		},
+		"equal bounds contained": {
+			Input: input{
+				a: feb,
+				b: feb,
+			},
+			Expected: true,
+		},
+		"extends past end not contained": {
+			Input: input{
+				a: feb,
+				b: NewSpan(Date(2026, 2, 20), Date(2026, 3, 1)),
+			},
+			Expected: false,
+		},
+		"starts before not contained": {
+			Input: input{
+				a: feb,
+				b: NewSpan(Date(2026, 1, 31), Date(2026, 2, 10)),
+			},
+			Expected: false,
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
 func TestSpan_Adjacent(t *testing.T) {
 	type input struct {
 		a Span

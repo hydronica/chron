@@ -12,8 +12,8 @@ type Precision uint8
 
 const (
 	Nanosecond Precision = iota
+	Microsecond
 	Millisecond
-	MicroSecond
 	Second
 	Minute
 	Hour
@@ -26,6 +26,7 @@ const (
 )
 
 // DefaultWeekStart is the week boundary used when the argument is Week.
+// Mutate only during package init, before concurrent Truncate/Span calls.
 var DefaultWeekStart = MondayWeek
 
 // Less reports whether p is a finer (smaller) unit than p2.
@@ -50,10 +51,10 @@ func (p Precision) Duration() Duration {
 		return Minutes(1)
 	case Second:
 		return Seconds(1)
-	case MicroSecond:
-		return Micros(1)
 	case Millisecond:
 		return Millis(1)
+	case Microsecond:
+		return Micros(1)
 	default: // case Nanosecond
 		return Nanos(1)
 	}
@@ -133,7 +134,7 @@ func layoutForPrecision(p Precision) string {
 		return "2006-01-02T15"
 	case Minute, Second:
 		return time.RFC3339
-	case Millisecond, MicroSecond, Nanosecond, Week, MondayWeek, SundayWeek:
+	case Millisecond, Microsecond, Nanosecond, Week, MondayWeek, SundayWeek:
 		return time.RFC3339Nano
 	default:
 		return time.RFC3339Nano

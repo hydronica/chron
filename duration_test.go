@@ -170,6 +170,18 @@ func TestDuration_Mul(t *testing.T) {
 			Input:    input{d: Months(2), n: 3},
 			Expected: "p6m",
 		},
+		"days times zero": {
+			Input:    input{d: Days(5), n: 0},
+			Expected: "",
+		},
+		"clock times two": {
+			Input:    input{d: Hours(3), n: 2},
+			Expected: "pt6h",
+		},
+		"negative scale": {
+			Input:    input{d: Weeks(1), n: -2},
+			Expected: "-p2w",
+		},
 	}
 	trial.New(fn, cases).SubTest(t)
 }
@@ -182,6 +194,59 @@ func TestDuration_Neg(t *testing.T) {
 		"negates months": {
 			Input:    Months(6),
 			Expected: "-p6m",
+		},
+		"negates clock": {
+			Input:    Hours(2),
+			Expected: "-pt2h",
+		},
+		"negates negative days": {
+			Input:    Days(-3),
+			Expected: "p3d",
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
+func TestDuration_Precision(t *testing.T) {
+	fn := func(d Duration) (Precision, error) {
+		return d.Precision(), nil
+	}
+	cases := trial.Cases[Duration, Precision]{
+		"year": {
+			Input:    Years(2),
+			Expected: Year,
+		},
+		"month": {
+			Input:    Months(3),
+			Expected: Month,
+		},
+		"week": {
+			Input:    Weeks(1),
+			Expected: Week,
+		},
+		"day": {
+			Input:    Days(2),
+			Expected: Day,
+		},
+		"hour": {
+			Input:    Hours(4),
+			Expected: Hour,
+		},
+		"millisecond": {
+			Input:    Millis(5),
+			Expected: Millisecond,
+		},
+		"microsecond": {
+			Input:    Micros(10),
+			Expected: Microsecond,
+		},
+		"nanosecond": {
+			Input:    Nanos(7),
+			Expected: Nanosecond,
+		},
+		"calendar finest wins": {
+			Input:    Years(1).Days(1),
+			Expected: Day,
 		},
 	}
 	trial.New(fn, cases).SubTest(t)

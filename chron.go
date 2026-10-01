@@ -38,6 +38,7 @@ func Date(y int, m time.Month, d int) Chron {
 
 // ParseFormats is the layout registry for Parse and UnmarshalJSON.
 // Register narrowest layouts before broader ones when ambiguity matters.
+// Mutate only during package init, before concurrent Parse calls.
 var ParseFormats = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
@@ -137,10 +138,10 @@ func Truncate(t time.Time, p Precision) time.Time {
 		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
 	case Second:
 		return t.Truncate(time.Second)
-	case MicroSecond:
-		return t.Truncate(time.Microsecond)
 	case Millisecond:
 		return t.Truncate(time.Millisecond)
+	case Microsecond:
+		return t.Truncate(time.Microsecond)
 	case Nanosecond:
 		return t
 	default:
@@ -168,7 +169,7 @@ func endOf(t time.Time, p Precision) time.Time {
 		return start.Add(time.Second).Add(-time.Nanosecond)
 	case Millisecond:
 		return start.Add(time.Millisecond).Add(-time.Nanosecond)
-	case MicroSecond:
+	case Microsecond:
 		return start.Add(time.Microsecond).Add(-time.Nanosecond)
 	case Nanosecond:
 		return start

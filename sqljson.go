@@ -27,13 +27,7 @@ func (c *Chron) UnmarshalJSON(data []byte) error {
 	}
 	parsed, err := Parse(s)
 	if err != nil {
-		parsed, err = ParseFrom(time.RFC3339, s)
-		if err != nil {
-			parsed, err = ParseFrom(time.RFC3339Nano, s)
-			if err != nil {
-				return err
-			}
-		}
+		return err
 	}
 	*c = parsed
 	return nil
@@ -69,13 +63,7 @@ func (c *Chron) Scan(src any) error {
 func (c *Chron) scanString(s string) error {
 	parsed, err := Parse(s)
 	if err != nil {
-		parsed, err = ParseFrom(time.RFC3339, s)
-		if err != nil {
-			parsed, err = ParseFrom(time.RFC3339Nano, s)
-			if err != nil {
-				return err
-			}
-		}
+		return err
 	}
 	*c = parsed
 	return nil
