@@ -1,7 +1,6 @@
 package chron
 
 import (
-	"strings"
 	"time"
 )
 
@@ -35,6 +34,37 @@ func (p Precision) Less(p2 Precision) bool {
 	return p < p2
 }
 
+func (p Precision) String() string {
+	switch p {
+	case Nanosecond:
+		return "nanosecond"
+	case Microsecond:
+		return "microsecond"
+	case Millisecond:
+		return "millisecond"
+	case Second:
+		return "second"
+	case Minute:
+		return "minute"
+	case Hour:
+		return "hour"
+	case Day:
+		return "day"
+	case MondayWeek:
+		return "monday_week"
+	case SundayWeek:
+		return "sunday_week"
+	case Week:
+		return "week"
+	case Month:
+		return "month"
+	case Year:
+		return "year"
+	default:
+		return ""
+	}
+}
+
 func (p Precision) Duration() Duration {
 	switch p {
 	case Year:
@@ -61,7 +91,7 @@ func (p Precision) Duration() Duration {
 }
 
 // weekBoundary returns the week-boundary selector for span/truncate operations.
-func weekBoundary(p Precision) Precision {
+func (p Precision) weekBoundary() Precision {
 	switch p {
 	case MondayWeek, SundayWeek:
 		return p
@@ -82,47 +112,16 @@ func precisionFromLayout(layout string) Precision {
 		return Day
 	case "2006-01-02T15":
 		return Hour
-	case "2006-01-02T15:04:05":
-		return Second
-	case time.RFC3339:
-		return Second
-	case time.RFC3339Nano:
-		return Nanosecond
-	default:
-		return precisionFromLayoutComponents(layout)
-	}
-}
-
-func precisionFromLayoutComponents(layout string) Precision {
-	hasYear := strings.Contains(layout, "2006")
-	hasMonth := strings.Contains(layout, "01")
-	hasDay := strings.Contains(layout, "02")
-	hasHour := strings.Contains(layout, "15")
-	hasMinute := strings.Contains(layout, "04")
-	hasSecond := strings.Contains(layout, "05")
-	hasFrac := strings.Contains(layout, "9") || strings.Contains(layout, "0")
-
-	switch {
-	case hasFrac:
-		return Nanosecond
-	case hasSecond:
-		return Second
-	case hasMinute:
+	case "2006-01-02T15:04":
 		return Minute
-	case hasHour:
-		return Hour
-	case hasDay:
-		return Day
-	case hasMonth:
-		return Month
-	case hasYear:
-		return Year
-	default:
+	case time.RFC3339, "2006-01-02T15:04:05":
+		return Second
+	default: // time.RFC3339Nano also covers unrecognized / custom layouts
 		return Nanosecond
 	}
 }
 
-func layoutForPrecision(p Precision) string {
+func (p Precision) layout() string {
 	switch p {
 	case Year:
 		return "2006"
@@ -136,7 +135,7 @@ func layoutForPrecision(p Precision) string {
 		return time.RFC3339
 	case Millisecond, Microsecond, Nanosecond, Week, MondayWeek, SundayWeek:
 		return time.RFC3339Nano
-	default:
+	default: // also covers unrecognized Precision values
 		return time.RFC3339Nano
 	}
 }

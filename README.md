@@ -118,7 +118,8 @@ week selectors follows `Truncate`/`EndOf` input.
 ## Time zones
 
 All times belong in UTC until a human needs to see them. Constructors (`Now`, `Date`,
-`Parse`, `FromTime`) guarantee UTC internal storage. Use `InLocation` for display only.
+`Parse`, `FromTime`) guarantee UTC internal storage. Use the promoted `In` method
+(from embedded `time.Time`) for display only.
 
 ## Development
 

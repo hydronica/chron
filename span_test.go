@@ -7,6 +7,27 @@ import (
 	"github.com/hydronica/trial"
 )
 
+func TestSpan_IsZero(t *testing.T) {
+	fn := func(s Span) (bool, error) {
+		return s.IsZero(), nil
+	}
+	cases := trial.Cases[Span, bool]{
+		"zero value": {
+			Input:    Span{},
+			Expected: true,
+		},
+		"point span not zero": {
+			Input:    NewSpan(Date(2026, 2, 1), Date(2026, 2, 1)),
+			Expected: false,
+		},
+		"only start set": {
+			Input:    Span{Start: Date(2026, 2, 1)},
+			Expected: false,
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
 func TestSpan_Contains(t *testing.T) {
 	type input struct {
 		span  Span

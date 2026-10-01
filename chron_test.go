@@ -178,6 +178,27 @@ func TestParse(t *testing.T) {
 	trial.New(fn, cases).SubTest(t)
 }
 
+func TestParseFrom(t *testing.T) {
+	type input struct {
+		layout string
+		value  string
+	}
+	fn := func(in input) (Chron, error) {
+		return ParseFrom(in.layout, in.value)
+	}
+	cases := trial.Cases[input, Chron]{
+		"registered day layout": {
+			Input:    input{layout: "2006-01-02", value: "2026-02-04"},
+			Expected: Chron{Time: trial.Day("2026-02-04"), precision: Day},
+		},
+		"custom layout defaults to nanosecond": {
+			Input:    input{layout: "2006-01-02T15:04", value: "2026-02-04T15:30"},
+			Expected: Chron{Time: time.Date(2026, 02, 04, 15, 30, 0, 0, time.UTC), precision: Minute},
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
 func TestChron_Sub(t *testing.T) {
 	c := Date(2026, 3, 1).Sub(Months(1))
 	want := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
@@ -285,13 +306,39 @@ func TestChron_EndOf(t *testing.T) {
 	}
 
 	fn := func(in input) (string, error) {
-		return in.anchor.EndOf(in.p).AsTime().UTC().Format(time.RFC3339Nano), nil
+		return in.anchor.EndOf(in.p).String(), nil
 	}
 
 	cases := trial.Cases[input, string]{
+		// Day/Month/Year precision .String() drops the sub-unit nanoseconds;
+		// Week precisions keep RFC3339Nano because no shorter canonical layout exists.
 		"day": {
 			Input:    input{anchor: testAnchor, p: Day},
 			Expected: "2026-02-04T23:59:59.999999999Z",
+		},
+		"hour": {
+			Input:    input{anchor: testAnchor, p: Hour},
+			Expected: "2026-02-04T15:59:59.999999999Z",
+		},
+		"minute": {
+			Input:    input{anchor: testAnchor, p: Minute},
+			Expected: "2026-02-04T15:30:59.999999999Z",
+		},
+		"second": {
+			Input:    input{anchor: testAnchor, p: Second},
+			Expected: "2026-02-04T15:30:45.999999999Z",
+		},
+		"millisecond": {
+			Input:    input{anchor: testAnchor, p: Millisecond},
+			Expected: "2026-02-04T15:30:45.123999999Z",
+		},
+		"microsecond": {
+			Input:    input{anchor: testAnchor, p: Microsecond},
+			Expected: "2026-02-04T15:30:45.123456999Z",
+		},
+		"nanosecond": {
+			Input:    input{anchor: testAnchor, p: Nanosecond},
+			Expected: "2026-02-04T15:30:45.123456789Z",
 		},
 		"week default monday": {
 			Input:    input{anchor: testAnchor, p: Week},
@@ -307,15 +354,15 @@ func TestChron_EndOf(t *testing.T) {
 		},
 		"month february non-leap": {
 			Input:    input{anchor: Date(2026, 2, 15), p: Month},
-			Expected: "2026-02-28T23:59:59.999999999Z",
+			Expected: "2026-02-28",
 		},
 		"month february leap": {
 			Input:    input{anchor: Date(2024, 2, 15), p: Month},
-			Expected: "2024-02-29T23:59:59.999999999Z",
+			Expected: "2024-02-29",
 		},
 		"month 31-day": {
 			Input:    input{anchor: Date(2026, 1, 10), p: Month},
-			Expected: "2026-01-31T23:59:59.999999999Z",
+			Expected: "2026-01-31",
 		},
 		"year": {
 			Input:    input{anchor: testAnchor, p: Year},

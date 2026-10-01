@@ -111,7 +111,7 @@ convert for display), but nothing enforces it.
    …) for buckets and membership — never overload the stdlib names.
 
 7. **UTC in, UTC stored.** Constructors normalize to UTC. Display conversion is
-   explicit (`InLocation`).
+   explicit (promoted `In` from embedded `time.Time`).
 
 8. **Easy by default.** Common cases are one line. Escape hatches (`AsTime`, raw
    `time.Time` embed) are always available.
@@ -458,7 +458,7 @@ comparison.
 | Method | Purpose |
 |--------|---------|
 | `UTC() Chron` | Ensure UTC (idempotent for constructors) |
-| `InLocation(loc *time.Location) time.Time` | For display only; returns `time.Time` to signal "leaving chron conventions" |
+| `In(loc *time.Location) time.Time` | Promoted from embedded `time.Time`; for display only |
 
 Storage stays UTC. Formatting for humans converts at the edge.
 
@@ -467,7 +467,7 @@ Storage stays UTC. Formatting for humans converts at the edge.
 **Asymmetric I/O (same pattern as `Duration`):** canonical ISO on marshal, lenient
 registry on unmarshal. Human-friendly strings (`"Jan 2026"`, `"02/2026"`) are accepted
 on **read** via `ParseFormats`; they are never canonical **write** output. Display for
-people uses `Format` / `InLocation` at the UI edge — not JSON.
+people uses `Format` / `In` at the UI edge — not JSON.
 
 | Method | Purpose |
 |--------|---------|
@@ -866,7 +866,7 @@ a calendar unit (`"2026-02"` → `Span(Month)`). Wire shape TBD in `chron_v1_par
 - **Not a separate type per precision.** No `chron.Hour` struct; use `Chron` + `Precision`.
 - **Not a `time.Time` replacement everywhere.** Use at domain boundaries.
 - **Not interface-driven.** No `chron.Time` or `chron.Span` interface.
-- **Not locale-aware formatting.** Use `time.Time.Format` after `InLocation` for i18n.
+- **Not locale-aware formatting.** Use `time.Time.Format` after `In` for i18n.
 - **Not leap-second modeling.** Follow stdlib behavior.
 - **Not a substitute for `time.Duration`.** Use stdlib for sleeps, timeouts, and fixed elapsed time; use `chron.Duration` when the *unit name* matters for calendar math.
 
@@ -920,7 +920,7 @@ implementation; add when a concrete use case appears.
 | **Mock / injectable clock** | Small `Clock` interface in test helper or `clock` package — not in core v1. |
 | **Scheduler / cron engine** | Out of scope; may consume `Chron` later. |
 | **Business-day / holiday calendars** | Named calendar dates in problem table; needs a richer model than `Chron` + `Span`. |
-| **Locale-aware formatting** | Stay in app layer via `InLocation` + `Format`; core remains UTC + ISO I/O. |
+| **Locale-aware formatting** | Stay in app layer via `In` + `Format`; core remains UTC + ISO I/O. |
 
 ### Interfaces (only if forced)
 
@@ -942,7 +942,7 @@ exist and callers must accept either — same stance as the original chron rewri
   `precision` automatically (`Parse`, `ParseFrom`, `UnmarshalJSON`, `Scan`). No separate
   precision field in JSON for the common `string` field case.
 - **Display:** `"Jan 2026"` and locale-specific forms are out of scope for canonical I/O;
-  use `Format` after `InLocation` at the application edge.
+  use `Format` after `In` at the application edge.
 
 ### Instant comparison (`Chron`)
 

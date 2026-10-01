@@ -124,6 +124,18 @@ func TestPrecision_Duration(t *testing.T) {
 			Input:    Hour,
 			Expected: "pt1h",
 		},
+		"minute": {
+			Input:    Minute,
+			Expected: "pt1m",
+		},
+		"second": {
+			Input:    Second,
+			Expected: "pt1s",
+		},
+		"millisecond": {
+			Input:    Millisecond,
+			Expected: "pt1ms",
+		},
 		"microsecond": {
 			Input:    Microsecond,
 			Expected: "pt1µs",
@@ -131,6 +143,14 @@ func TestPrecision_Duration(t *testing.T) {
 		"nanosecond": {
 			Input:    Nanosecond,
 			Expected: "pt1ns",
+		},
+		"monday week": {
+			Input:    MondayWeek,
+			Expected: "p1w",
+		},
+		"sunday week": {
+			Input:    SundayWeek,
+			Expected: "p1w",
 		},
 	}
 	trial.New(fn, cases).SubTest(t)

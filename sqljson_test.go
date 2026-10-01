@@ -2,6 +2,7 @@ package chron
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -62,36 +63,34 @@ func TestChron_Value(t *testing.T) {
 }
 
 func TestChron_Scan(t *testing.T) {
-	type input struct {
-		src any
-	}
-
-	fn := func(in input) (string, error) {
+	fn := func(src any) (string, error) {
 		var c Chron
-		if err := c.Scan(in.src); err != nil {
+		if err := c.Scan(src); err != nil {
 			return "", err
 		}
 		return c.String(), nil
 	}
 
-	cases := trial.Cases[input, string]{
+	cases := trial.Cases[any, string]{
 		"nil": {
-			Input:    input{src: nil},
+			Input:    nil,
 			Expected: "",
 		},
 		"time.Time": {
-			Input: input{
-				src: time.Date(2026, 2, 4, 15, 30, 45, 0, time.UTC),
-			},
+			Input:    time.Date(2026, 2, 4, 15, 30, 45, 0, time.UTC),
 			Expected: "2026-02-04T15:30:45Z",
 		},
 		"string day": {
-			Input:    input{src: "2026-02-04"},
+			Input:    "2026-02-04",
 			Expected: "2026-02-04",
 		},
 		"bytes RFC3339": {
-			Input:    input{src: []byte("2026-02-04T15:30:45Z")},
+			Input:    []byte("2026-02-04T15:30:45Z"),
 			Expected: "2026-02-04T15:30:45Z",
+		},
+		"unsupported type": {
+			Input:       42,
+			ExpectedErr: fmt.Errorf("chron: cannot scan int into Chron"),
 		},
 	}
 	trial.New(fn, cases).SubTest(t)

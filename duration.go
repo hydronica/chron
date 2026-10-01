@@ -81,6 +81,8 @@ func MustDuration(s string) Duration {
 }
 
 // ParseDuration parses an ISO 8601 duration string with chron extensions.
+// Blank and whitespace-only input error. Explicit zeros such as "P0D", "PT0S",
+// and "0d" succeed as a zero Duration (same idea as time.ParseDuration("0s")).
 func ParseDuration(s string) (Duration, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -120,6 +122,12 @@ func ParseDuration(s string) (Duration, error) {
 		datePart = body
 	}
 
+	// Require at least one component so bare "P"/"PT" stay invalid, while
+	// explicit zeros ("P0D", "PT0S") parse successfully.
+	if datePart == "" && timePart == "" {
+		return Duration{}, errParseDuration
+	}
+
 	d := Duration{}
 	if err := parseDatePart(datePart, &d); err != nil {
 		return Duration{}, err
@@ -128,9 +136,6 @@ func ParseDuration(s string) (Duration, error) {
 		return Duration{}, err
 	}
 
-	if d.IsZero() {
-		return Duration{}, errParseDuration
-	}
 	if neg {
 		d = d.Neg()
 	}

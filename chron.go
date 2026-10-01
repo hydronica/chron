@@ -43,6 +43,7 @@ var ParseFormats = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
 	"2006-01-02T15:04:05",
+	"2006-01-02T15:04",
 	"2006-01-02T15",
 	"2006-01-02",
 	"2006-01",
@@ -80,11 +81,6 @@ func (c Chron) AsTime() time.Time {
 	return c.Time
 }
 
-// InLocation returns the instant in loc for display only.
-func (c Chron) InLocation(loc *time.Location) time.Time {
-	return c.Time.In(loc)
-}
-
 // Truncate returns the inclusive start of the unit containing c and sets
 // precision on the result to p (including MondayWeek and SundayWeek).
 func (c Chron) Truncate(p Precision) Chron {
@@ -93,8 +89,9 @@ func (c Chron) Truncate(p Precision) Chron {
 
 // EndOf returns the inclusive end of the unit containing c for precision p.
 // The result is the last nanosecond of that unit (UTC).
+// p selects the unit; the result keeps c's precision.
 func (c Chron) EndOf(p Precision) Chron {
-	return Chron{Time: endOf(c.Time, p), precision: p}
+	return Chron{Time: endOf(c.Time, p), precision: c.precision}
 }
 
 // Add applies d relative to c and updates precision per offset rules.
@@ -121,7 +118,7 @@ func (c Chron) Span(p Precision) Span {
 func Truncate(t time.Time, p Precision) time.Time {
 	t = t.UTC()
 
-	switch weekBoundary(p) {
+	switch p.weekBoundary() {
 	case Year:
 		return time.Date(t.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
 	case Month:
@@ -142,9 +139,7 @@ func Truncate(t time.Time, p Precision) time.Time {
 		return t.Truncate(time.Millisecond)
 	case Microsecond:
 		return t.Truncate(time.Microsecond)
-	case Nanosecond:
-		return t
-	default:
+	default: // Nanosecond: or unknown Precision values
 		return t
 	}
 }
@@ -152,7 +147,7 @@ func Truncate(t time.Time, p Precision) time.Time {
 // endOf returns the last nanosecond of the unit containing t for precision p.
 func endOf(t time.Time, p Precision) time.Time {
 	start := Truncate(t, p)
-	switch weekBoundary(p) {
+	switch p.weekBoundary() {
 	case Year:
 		return time.Date(start.Year(), time.December, 31, 23, 59, 59, 999999999, time.UTC)
 	case Month:
@@ -171,9 +166,7 @@ func endOf(t time.Time, p Precision) time.Time {
 		return start.Add(time.Millisecond).Add(-time.Nanosecond)
 	case Microsecond:
 		return start.Add(time.Microsecond).Add(-time.Nanosecond)
-	case Nanosecond:
-		return start
-	default:
+	default: //  Nanosecond or unknown Precision values
 		return start
 	}
 }
@@ -194,9 +187,5 @@ func (c Chron) String() string {
 	if c.IsZero() {
 		return ""
 	}
-	layout := layoutForPrecision(c.precision)
-	if layout == time.RFC3339 || layout == time.RFC3339Nano {
-		return c.Time.UTC().Format(layout)
-	}
-	return c.Time.UTC().Format(layout)
+	return c.Time.UTC().Format(c.precision.layout())
 }

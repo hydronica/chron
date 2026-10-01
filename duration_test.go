@@ -65,6 +65,42 @@ func TestParseDuration(t *testing.T) {
 			Input:    "P2W1D",
 			Expected: Weeks(2).Days(1),
 		},
+		"blank": {
+			Input:       "",
+			ExpectedErr: errParseDuration,
+		},
+		"whitespace only": {
+			Input:       "   ",
+			ExpectedErr: errParseDuration,
+		},
+		"zero ISO days": {
+			Input:    "P0D",
+			Expected: Duration{},
+		},
+		"zero ISO seconds": {
+			Input:    "PT0S",
+			Expected: Duration{},
+		},
+		"zero bare days": {
+			Input:    "0d",
+			Expected: Duration{},
+		},
+		"invalid garbage": {
+			Input:       "garbage",
+			ExpectedErr: errParseDuration,
+		},
+		"invalid bare P": {
+			Input:       "P",
+			ExpectedErr: errParseDuration,
+		},
+		"invalid bare PT": {
+			Input:       "PT",
+			ExpectedErr: errParseDuration,
+		},
+		"invalid unknown unit": {
+			Input:       "P1X",
+			ExpectedErr: errParseDuration,
+		},
 		"fractional month rejected": {
 			Input:       "P1.5M",
 			ExpectedErr: errInvalidDuration,
