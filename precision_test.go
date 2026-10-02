@@ -1,6 +1,7 @@
 package chron
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/hydronica/trial"
@@ -151,6 +152,99 @@ func TestPrecision_Duration(t *testing.T) {
 		"sunday week": {
 			Input:    SundayWeek,
 			Expected: "p1w",
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
+func TestPrecision_MarshalJSON(t *testing.T) {
+	fn := func(p Precision) (string, error) {
+		data, err := json.Marshal(p)
+		return string(data), err
+	}
+	cases := trial.Cases[Precision, string]{
+		"nanosecond": {
+			Input:    Nanosecond,
+			Expected: `"nanosecond"`,
+		},
+		"day": {
+			Input:    Day,
+			Expected: `"day"`,
+		},
+		"month": {
+			Input:    Month,
+			Expected: `"month"`,
+		},
+		"year": {
+			Input:    Year,
+			Expected: `"year"`,
+		},
+		"monday week": {
+			Input:    MondayWeek,
+			Expected: `"monday_week"`,
+		},
+		"sunday week": {
+			Input:    SundayWeek,
+			Expected: `"sunday_week"`,
+		},
+		"week": {
+			Input:    Week,
+			Expected: `"week"`,
+		},
+		"unknown value": {
+			Input:       Precision(255),
+			ExpectedErr: errInvalidPrecision,
+		},
+	}
+	trial.New(fn, cases).SubTest(t)
+}
+
+func TestPrecision_UnmarshalJSON(t *testing.T) {
+	fn := func(raw string) (Precision, error) {
+		var p Precision
+		err := json.Unmarshal([]byte(raw), &p)
+		return p, err
+	}
+	cases := trial.Cases[string, Precision]{
+		"null": {
+			Input:    `null`,
+			Expected: Nanosecond,
+		},
+		"nanosecond": {
+			Input:    `"nanosecond"`,
+			Expected: Nanosecond,
+		},
+		"day": {
+			Input:    `"day"`,
+			Expected: Day,
+		},
+		"month": {
+			Input:    `"month"`,
+			Expected: Month,
+		},
+		"year": {
+			Input:    `"year"`,
+			Expected: Year,
+		},
+		"monday week": {
+			Input:    `"monday_week"`,
+			Expected: MondayWeek,
+		},
+		"sunday week": {
+			Input:    `"sunday_week"`,
+			Expected: SundayWeek,
+		},
+		"week": {
+			Input:    `"week"`,
+			Expected: Week,
+		},
+		"rejects integer": {
+			Input:     `0`,
+			ShouldErr: true,
+		},
+		"rejects unknown string": {
+			Input:       `"fortnight"`,
+			ExpectedErr: errInvalidPrecision,
 		},
 	}
 	trial.New(fn, cases).SubTest(t)

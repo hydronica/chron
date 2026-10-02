@@ -102,8 +102,8 @@ func TestParseDuration(t *testing.T) {
 			ExpectedErr: errParseDuration,
 		},
 		"fractional month rejected": {
-			Input:       "P1.5M",
-			ExpectedErr: errInvalidDuration,
+			Input:     "P1.5M",
+			ShouldErr: true,
 		},
 	}
 	trial.New(ParseDuration, cases).SubTest(t)

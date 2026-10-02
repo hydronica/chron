@@ -1,6 +1,7 @@
 package chron
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -22,6 +23,7 @@ const (
 	Week       // Span/Truncate: uses DefaultWeekStart
 	Month
 	Year
+	invalid
 )
 
 // DefaultWeekStart is the week boundary used when the argument is Week.
@@ -62,6 +64,64 @@ func (p Precision) String() string {
 		return "year"
 	default:
 		return ""
+	}
+}
+
+// MarshalJSON encodes p as a JSON string (e.g. "day"), not an integer.
+func (p Precision) MarshalJSON() ([]byte, error) {
+	s := p.String()
+	if s == "" {
+		return nil, errInvalidPrecision
+	}
+	return json.Marshal(s)
+}
+
+// UnmarshalJSON decodes a JSON string into p. Null maps to Nanosecond.
+func (p *Precision) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*p = Nanosecond
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+
+	*p = precisionFromString(s)
+	if *p == invalid {
+		return errInvalidPrecision
+	}
+	return nil
+}
+
+func precisionFromString(s string) Precision {
+	switch s {
+	case "nanosecond":
+		return Nanosecond
+	case "microsecond":
+		return Microsecond
+	case "millisecond":
+		return Millisecond
+	case "second":
+		return Second
+	case "minute":
+		return Minute
+	case "hour":
+		return Hour
+	case "day":
+		return Day
+	case "monday_week":
+		return MondayWeek
+	case "sunday_week":
+		return SundayWeek
+	case "week":
+		return Week
+	case "month":
+		return Month
+	case "year":
+		return Year
+	default:
+		return invalid
 	}
 }
 

@@ -6,9 +6,10 @@ import (
 )
 
 var (
-	errParseChron      = errors.New("chron: unable to parse time")
-	errParseDuration   = errors.New("chron: unable to parse duration")
-	errInvalidDuration = errors.New("chron: invalid duration")
+	errParseChron       = errors.New("chron: unable to parse time")
+	errParseDuration    = errors.New("chron: unable to parse duration")
+	errInvalidDuration  = errors.New("chron: invalid duration")
+	errInvalidPrecision = errors.New("chron: invalid precision")
 )
 
 // Chron is an instant in time with nanosecond storage precision.

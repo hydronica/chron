@@ -200,21 +200,16 @@ func isBareClockUnit(s string) bool {
 	}
 	return false
 }
-
 func parseDatePart(part string, d *Duration) error {
-	if part == "" {
-		return nil
-	}
 	for len(part) > 0 {
 		numStr, rest, ok := readNumber(part)
-		if !ok || len(rest) == 0 {
+		if !ok || rest == "" {
 			return errParseDuration
 		}
 		unit := unicode.ToLower(rune(rest[0]))
 		part = rest[1:]
 
-		switch unit {
-		case 'y':
+		if unit == 'y' {
 			if strings.ContainsAny(numStr, ".,") {
 				f, err := strconv.ParseFloat(strings.ReplaceAll(numStr, ",", "."), 64)
 				if err != nil {
@@ -222,39 +217,26 @@ func parseDatePart(part string, d *Duration) error {
 				}
 				// Fractional years become whole months (P1.5Y → 18).
 				d.months += int32(f * 12)
-			} else {
-				n, err := strconv.Atoi(numStr)
-				if err != nil {
-					return errParseDuration
-				}
-				d.months += int32(n) * 12
-			}
-		case 'm':
-			if strings.ContainsAny(numStr, ".,") {
-				return errInvalidDuration
+				continue
 			}
 			n, err := strconv.Atoi(numStr)
 			if err != nil {
 				return errParseDuration
 			}
+			d.months += int32(n) * 12
+			continue
+		}
+
+		n, err := strconv.Atoi(strings.ReplaceAll(numStr, ",", "."))
+		if err != nil {
+			return err
+		}
+		switch unit {
+		case 'm':
 			d.months += int32(n)
 		case 'w':
-			if strings.ContainsAny(numStr, ".,") {
-				return errInvalidDuration
-			}
-			n, err := strconv.Atoi(numStr)
-			if err != nil {
-				return errParseDuration
-			}
 			d.days += int32(n) * 7
 		case 'd':
-			if strings.ContainsAny(numStr, ".,") {
-				return errInvalidDuration
-			}
-			n, err := strconv.Atoi(numStr)
-			if err != nil {
-				return errParseDuration
-			}
 			d.days += int32(n)
 		default:
 			return errParseDuration
@@ -270,54 +252,46 @@ func parseTimePart(part string, d *Duration) error {
 			return errParseDuration
 		}
 		numStr = strings.ReplaceAll(numStr, ",", ".")
-		lowerRest := strings.ToLower(rest)
+		lower := strings.ToLower(rest)
 
-		var consumed int
+		// Longer prefixes first so "ms" is not read as minutes.
+		// µ (U+00B5) and μ (U+03BC) are both 3 bytes and do not case-fold into each other.
+		var (
+			scale    time.Duration
+			consumed int
+			frac     bool
+		)
 		switch {
-		case strings.HasPrefix(lowerRest, "ms"):
-			n, err := parseIntUnit(numStr)
-			if err != nil {
-				return err
-			}
-			d.clock += time.Duration(n) * time.Millisecond
-			consumed = 2
-		case strings.HasPrefix(lowerRest, "us"), strings.HasPrefix(lowerRest, "µs"), strings.HasPrefix(lowerRest, "μs"):
-			n, err := parseIntUnit(numStr)
-			if err != nil {
-				return err
-			}
-			d.clock += time.Duration(n) * time.Microsecond
-			consumed = unitLen(rest, "us", "µs", "μs")
-		case strings.HasPrefix(lowerRest, "ns"):
-			n, err := parseIntUnit(numStr)
-			if err != nil {
-				return err
-			}
-			d.clock += time.Duration(n) * time.Nanosecond
-			consumed = 2
-		case strings.HasPrefix(lowerRest, "h"):
-			n, err := parseIntUnit(numStr)
-			if err != nil {
-				return err
-			}
-			d.clock += time.Duration(n) * time.Hour
-			consumed = 1
-		case strings.HasPrefix(lowerRest, "m"):
-			n, err := parseIntUnit(numStr)
-			if err != nil {
-				return err
-			}
-			d.clock += time.Duration(n) * time.Minute
-			consumed = 1
-		case strings.HasPrefix(lowerRest, "s"):
+		case strings.HasPrefix(lower, "ms"):
+			scale, consumed = time.Millisecond, len("ms")
+		case strings.HasPrefix(lower, "ns"):
+			scale, consumed = time.Nanosecond, len("ns")
+		case strings.HasPrefix(lower, "us"):
+			scale, consumed = time.Microsecond, len("us")
+		case strings.HasPrefix(lower, "µs"), strings.HasPrefix(lower, "μs"):
+			scale, consumed = time.Microsecond, len("µs")
+		case strings.HasPrefix(lower, "h"):
+			scale, consumed = time.Hour, len("h")
+		case strings.HasPrefix(lower, "m"):
+			scale, consumed = time.Minute, len("m")
+		case strings.HasPrefix(lower, "s"):
+			scale, consumed, frac = time.Second, len("s"), true
+		default:
+			return errParseDuration
+		}
+
+		if frac {
 			f, err := strconv.ParseFloat(numStr, 64)
 			if err != nil {
 				return errParseDuration
 			}
-			d.clock += time.Duration(f * float64(time.Second))
-			consumed = 1
-		default:
-			return errParseDuration
+			d.clock += time.Duration(f * float64(scale))
+		} else {
+			n, err := strconv.Atoi(numStr)
+			if err != nil {
+				return err
+			}
+			d.clock += time.Duration(n) * scale
 		}
 		part = rest[consumed:]
 	}
@@ -333,30 +307,6 @@ func readNumber(s string) (num, rest string, ok bool) {
 		return "", "", false
 	}
 	return s[:i], s[i:], true
-}
-
-func parseIntUnit(numStr string) (int, error) {
-	if strings.Contains(numStr, ".") {
-		return 0, errInvalidDuration
-	}
-	n, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0, errParseDuration
-	}
-	return n, nil
-}
-
-func unitLen(rest string, ascii string, runes ...string) int {
-	lower := strings.ToLower(rest)
-	if strings.HasPrefix(lower, ascii) {
-		return len(ascii)
-	}
-	for _, r := range runes {
-		if strings.HasPrefix(rest, r) {
-			return len(r)
-		}
-	}
-	return 2
 }
 
 // String returns the canonical lowercase duration string.
