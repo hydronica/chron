@@ -9,6 +9,8 @@ var (
 	errParseChron       = errors.New("chron: unable to parse time")
 	errParseDuration    = errors.New("chron: unable to parse duration")
 	errInvalidPrecision = errors.New("chron: invalid precision")
+	errInvalidPeriod    = errors.New("chron: invalid period")
+	errInvalidWeekday   = errors.New("chron: invalid weekday")
 )
 
 // Chron is an instant in time with nanosecond storage precision.
@@ -34,6 +36,36 @@ func Date(y int, m time.Month, d int) Chron {
 		Time:      time.Date(y, m, d, 0, 0, 0, 0, time.UTC),
 		precision: Day,
 	}
+}
+
+// NthWeekday returns the nth occurrence of weekday in month of year (1-based).
+// n < 1, or an n past the last matching weekday in that month, returns
+// errInvalidWeekday. The result is midnight UTC with Day precision.
+func NthWeekday(year int, month time.Month, weekday time.Weekday, n int) (Chron, error) {
+	if n < 1 {
+		return Chron{}, errInvalidWeekday
+	}
+	d := Date(year, month, 1)
+	for d.Month() == month {
+		if d.Weekday() == weekday {
+			n--
+			if n == 0 {
+				return d, nil
+			}
+		}
+		d = d.Add(Days(1))
+	}
+	return Chron{}, errInvalidWeekday
+}
+
+// LastWeekday returns the last occurrence of weekday in month of year.
+// The result is midnight UTC with Day precision.
+func LastWeekday(year int, month time.Month, weekday time.Weekday) Chron {
+	d := Date(year, month, 1).Add(Months(1)).Sub(Days(1))
+	for d.Weekday() != weekday {
+		d = d.Sub(Days(1))
+	}
+	return d
 }
 
 // ParseFormats is the layout registry for Parse and UnmarshalJSON.
@@ -148,6 +180,32 @@ func (c Chron) Sub(d Duration) Chron {
 // Span returns the closed interval [start, end] containing c for precision p.
 func (c Chron) Span(p Precision) Span {
 	return NewSpan(c.Truncate(p), c.EndOf(p))
+}
+
+// Period returns the closed reporting window for p relative to c.
+// To-date windows end at EndOf(Day). An out-of-range Period uses MonthToDate.
+// Week windows follow DefaultWeekStart, the same as Truncate(Week).
+func (c Chron) Period(p Period) Span {
+	switch p {
+	case YearToDate:
+		return NewSpan(c.Truncate(Year), c.EndOf(Day))
+	case PrevMonth:
+		return c.Truncate(Month).Sub(Months(1)).Span(Month)
+	case PrevMonthToDate:
+		start := c.Truncate(Month).Sub(Months(1))
+		end := c.Truncate(Day).Sub(Months(1)).EndOf(Day)
+		return NewSpan(start, end)
+	case PrevYearMonthToDate:
+		end := c.Truncate(Day).Sub(Years(1)).EndOf(Day)
+		return NewSpan(end.Truncate(Month), end)
+	case PrevYearToDate:
+		end := c.Truncate(Day).Sub(Years(1)).EndOf(Day)
+		return NewSpan(end.Truncate(Year), end)
+	case LastFullWeek:
+		return c.Truncate(Week).Sub(Weeks(1)).Span(Week)
+	default: // MonthToDate and unknown Period values
+		return NewSpan(c.Truncate(Month), c.EndOf(Day))
+	}
 }
 
 // Truncate returns the inclusive start of the unit containing t for precision p.

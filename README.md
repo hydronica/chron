@@ -45,6 +45,7 @@ mid.Add(chron.Months(1))                                // 2026-02-15 (same day 
 | `Duration` | An offset in years, months, weeks, days, and/or clock time |
 | `Span` | A range from `Start` to `End` that includes both ends |
 | `Precision` | How coarse the value is — used for truncate, format, and spans |
+| `Period` | A named reporting window relative to a `Chron` (month-to-date, …) |
 
 All constructors store UTC. To ask “is this event in February?”, build a month `Span` and call `Contains` — do not use `Before` / `After` alone.
 
@@ -177,6 +178,35 @@ for day := range chron.NewSpan(start, end).Each(chron.Days(1)) {
 | `Adjacent` | Touching with a one-nanosecond gap, and not overlapping |
 | `ContainsSpan` | `other` lies entirely inside this span |
 | `Chron.Span(p)` | Full range for that unit (for example, all of February) |
+| `Chron.Period(p)` | Named reporting window relative to this instant |
+
+## Reporting spans
+
+`Period` selects a closed reporting window from a `Chron`. To-date windows end at the last nanosecond of that calendar day (`EndOf(Day)`). The zero value is `MonthToDate`, so an unset `Period` is month-to-date.
+
+```go
+mtd := now.Period(chron.MonthToDate) // [1st of month, EndOf(Day)]
+ytd := now.Period(chron.YearToDate)
+prev := now.Period(chron.PrevMonth)  // full previous month
+
+var p chron.Period
+_ = json.Unmarshal([]byte(`"prev_year_to_date"`), &p) // same snake_case as Precision
+span := now.Period(p)
+```
+
+| Constant | Window |
+|----------|--------|
+| `MonthToDate` | From the 1st of this month through `EndOf(Day)` |
+| `YearToDate` | From Jan 1 through `EndOf(Day)` |
+| `PrevMonth` | Full previous calendar month |
+| `PrevMonthToDate` | Previous month, 1st through the same day (clamped) |
+| `PrevYearMonthToDate` | Same month last year, 1st through the same day (clamped) |
+| `PrevYearToDate` | Jan 1 last year through the same month/day (clamped) |
+| `LastFullWeek` | The completed week before the week that contains this instant |
+
+Prior-period day numbers clamp when the target month is shorter (31 March → 28 February; 29 February → 28 February). `LastFullWeek` follows `DefaultWeekStart`, the same as `Truncate(Week)`.
+
+JSON encodes a `Period` as a snake_case string (`"month_to_date"`). `null` unmarshals to `MonthToDate`. An unknown string fails only in marshal/unmarshal; `Chron.Period` always returns a `Span`.
 
 ## Precision
 
@@ -213,7 +243,7 @@ A zero `Chron` prints as `""` and marshals as JSON `null`. For SQL, `Value` retu
 
 ## Limitations
 
-- No job scheduling or holiday calendars
+- No job scheduling or holiday calendars — use `NthWeekday` / `LastWeekday` for nth-weekday math
 - Sleeps and timeouts stay on `time.Duration`
 - No separate date-only type; no `SameYear` / `SameMonth` / `SameDay` helpers — use `Span.Contains` or compare truncated values
 - `Span` has no JSON encoding, and no `Shift`, `Extend`, or `Intersection`
