@@ -95,13 +95,49 @@ func (c Chron) EndOf(p Precision) Chron {
 }
 
 // Add applies d relative to c and updates precision per offset rules.
+// Months are clamped to the last day of the target month (Jan 31 + 1 month →
+// Feb 28/29), unlike time.Time.AddDate which overflows into the following month.
+// Days and clock are applied after months.
+// Result precision is the finer of c's precision and d.Precision() (e.g. Day +
+// Months keeps Day; Day + Seconds becomes Second).
 func (c Chron) Add(d Duration) Chron {
-	t := c.Time.AddDate(0, int(d.months), int(d.days)).Add(d.clock)
+	t := c.Time
+	if d.months != 0 {
+		t = addMonthsClamp(t, int(d.months))
+	}
+	if d.days != 0 {
+		t = t.AddDate(0, 0, int(d.days))
+	}
+	if d.clock != 0 {
+		t = t.Add(d.clock)
+	}
 	p := d.Precision()
-	if c.precision == Nanosecond && d.clockOnly() {
-		p = Nanosecond
+	if c.precision.Less(p) {
+		p = c.precision
 	}
 	return Chron{Time: t, precision: p}
+}
+
+// addMonthsClamp shifts t by months, clamping the day to the last day of the
+// destination month when the source day does not exist there.
+func addMonthsClamp(t time.Time, months int) time.Time {
+	year, month, day := t.Date()
+	h, min, sec := t.Clock()
+	nsec := t.Nanosecond()
+
+	am := year*12 + int(month-1) + months
+	year = am / 12
+	mo := am % 12
+	if mo < 0 {
+		mo += 12
+		year--
+	}
+	dest := time.Month(mo + 1)
+	last := time.Date(year, dest+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	if day > last {
+		day = last
+	}
+	return time.Date(year, dest, day, h, min, sec, nsec, t.Location())
 }
 
 // Sub subtracts d from c.

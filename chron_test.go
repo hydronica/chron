@@ -77,59 +77,97 @@ func TestChron_Add(t *testing.T) {
 		base Chron
 		d    Duration
 	}
-
-	fn := func(c addCase) (string, error) {
-		return c.base.Add(c.d).String(), nil
+	type addOut struct {
+		S string // String() — precision-aware form
+		T string // AsTime UTC RFC3339Nano — calendar day for clamp cases
 	}
 
-	cases := trial.Cases[addCase, string]{
+	fn := func(c addCase) (addOut, error) {
+		got := c.base.Add(c.d)
+		return addOut{
+			S: got.String(),
+			T: got.AsTime().UTC().Format(time.RFC3339Nano),
+		}, nil
+	}
+
+	cases := trial.Cases[addCase, addOut]{
 		"year": {
 			Input:    addCase{base: testAnchor, d: Years(1)},
-			Expected: "2027",
+			Expected: addOut{S: "2027-02-04T15:30:45.123456789Z", T: "2027-02-04T15:30:45.123456789Z"},
 		},
 		"month": {
 			Input:    addCase{base: testAnchor, d: Months(1)},
-			Expected: "2026-03",
+			Expected: addOut{S: "2026-03-04T15:30:45.123456789Z", T: "2026-03-04T15:30:45.123456789Z"},
 		},
 		"week": {
 			Input:    addCase{base: day, d: Weeks(1)},
-			Expected: "2026-02-11T00:00:00Z",
+			Expected: addOut{S: "2026-02-11", T: "2026-02-11T00:00:00Z"},
 		},
 		"day": {
 			Input:    addCase{base: testAnchor, d: Days(5)},
-			Expected: "2026-02-09",
+			Expected: addOut{S: "2026-02-09T15:30:45.123456789Z", T: "2026-02-09T15:30:45.123456789Z"},
 		},
 		"hour": {
 			Input:    addCase{base: day, d: Hours(3)},
-			Expected: "2026-02-04T03",
+			Expected: addOut{S: "2026-02-04T03", T: "2026-02-04T03:00:00Z"},
 		},
 		"minute": {
 			Input:    addCase{base: day, d: Minutes(15)},
-			Expected: "2026-02-04T00:15:00Z",
+			Expected: addOut{S: "2026-02-04T00:15:00Z", T: "2026-02-04T00:15:00Z"},
 		},
 		"second": {
 			Input:    addCase{base: day, d: Seconds(30)},
-			Expected: "2026-02-04T00:00:30Z",
+			Expected: addOut{S: "2026-02-04T00:00:30Z", T: "2026-02-04T00:00:30Z"},
 		},
 		"millisecond": {
 			Input:    addCase{base: day, d: Millis(250)},
-			Expected: "2026-02-04T00:00:00.25Z",
+			Expected: addOut{S: "2026-02-04T00:00:00.25Z", T: "2026-02-04T00:00:00.25Z"},
 		},
 		"microsecond": {
 			Input:    addCase{base: day, d: Micros(500)},
-			Expected: "2026-02-04T00:00:00.0005Z",
+			Expected: addOut{S: "2026-02-04T00:00:00.0005Z", T: "2026-02-04T00:00:00.0005Z"},
 		},
 		"nanosecond": {
 			Input:    addCase{base: day, d: Nanos(100)},
-			Expected: "2026-02-04T00:00:00.0000001Z",
+			Expected: addOut{S: "2026-02-04T00:00:00.0000001Z", T: "2026-02-04T00:00:00.0000001Z"},
 		},
 		"month anchor plus days": {
 			Input:    addCase{base: month, d: Days(5)},
-			Expected: "2026-02-06",
+			Expected: addOut{S: "2026-02-06", T: "2026-02-06T00:00:00Z"},
 		},
-		"nanosecond receiver clock-only keeps nanosecond": {
+		"month plus month keeps month": {
+			Input:    addCase{base: month, d: Months(1)},
+			Expected: addOut{S: "2026-03", T: "2026-03-01T00:00:00Z"},
+		},
+		"finer of nanosecond receiver and clock offset": {
 			Input:    addCase{base: testAnchor, d: Hours(2)},
-			Expected: "2026-02-04T17:30:45.123456789Z",
+			Expected: addOut{S: "2026-02-04T17:30:45.123456789Z", T: "2026-02-04T17:30:45.123456789Z"},
+		},
+		// Month add clamps to last day of target month (never AddDate overflow).
+		// Date is Day precision; Months is coarser → result stays Day.
+		"jan 31 plus one month clamps to feb 28": {
+			Input:    addCase{base: Date(2026, 1, 31), d: Months(1)},
+			Expected: addOut{S: "2026-02-28", T: "2026-02-28T00:00:00Z"},
+		},
+		"jan 31 plus one month in leap year clamps to feb 29": {
+			Input:    addCase{base: Date(2024, 1, 31), d: Months(1)},
+			Expected: addOut{S: "2024-02-29", T: "2024-02-29T00:00:00Z"},
+		},
+		"mar 31 plus one month clamps to apr 30": {
+			Input:    addCase{base: Date(2026, 3, 31), d: Months(1)},
+			Expected: addOut{S: "2026-04-30", T: "2026-04-30T00:00:00Z"},
+		},
+		"mar 31 minus one month clamps to feb 28": {
+			Input:    addCase{base: Date(2026, 3, 31), d: Months(-1)},
+			Expected: addOut{S: "2026-02-28", T: "2026-02-28T00:00:00Z"},
+		},
+		"feb 29 plus one year clamps to feb 28": {
+			Input:    addCase{base: Date(2024, 2, 29), d: Years(1)},
+			Expected: addOut{S: "2025-02-28", T: "2025-02-28T00:00:00Z"},
+		},
+		"mar 3 minus one month": {
+			Input:    addCase{base: Date(2025, 3, 3), d: Months(-1)},
+			Expected: addOut{S: "2025-02-03", T: "2025-02-03T00:00:00Z"},
 		},
 	}
 	trial.New(fn, cases).SubTest(t)

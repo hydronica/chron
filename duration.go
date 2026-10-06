@@ -65,10 +65,6 @@ func (d Duration) IsZero() bool {
 	return d.months == 0 && d.days == 0 && d.clock == 0
 }
 
-func (d Duration) clockOnly() bool {
-	return d.months == 0 && d.days == 0
-}
-
 // MustDuration parses s and panics on error. Prefer ParseDuration at I/O boundaries.
 // Spec name Duration(s) is spelled MustDuration here because Go disallows a func and
 // type with the same identifier in one package.
